@@ -18,7 +18,7 @@ def hilbert_schmidt_test(u: QuantumCircuit, v_adj: QuantumCircuit) -> QuantumCir
         qc.cx(i, i + n)
 
     qc.compose(u.to_gate(label='U'), sys_a, inplace=True)
-    qc.compose(v_adj.to_gate(label='U'), sys_b, inplace=True)
+    qc.compose(v_adj.to_gate(label='U'), sys_a, inplace=True)
 
     for i in range(n):
         qc.cx(i, i + n)
