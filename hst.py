@@ -55,10 +55,44 @@ def hst(u: QuantumCircuit, v_adj: QuantumCircuit) -> QuantumCircuit:
 
     return qc
 
+
+def _let_base(n: int) -> Tuple[QuantumCircuit, QuantumRegister, ClassicalRegister]:
+    quantum = QuantumRegister(n)
+    classical = ClassicalRegister(n)
+
+    return QuantumCircuit(quantum, classical), quantum, classical
+
+def let(u: QuantumCircuit, v_adj: QuantumCircuit) -> QuantumCircuit:
+    assert u.num_qubits == v_adj.num_qubits
+
+    n = u.num_qubits
+    qc, quantum, classical = _let_base(n)
+
+    qc.compose(u.to_gate(label='U'), quantum, inplace=True)
+    qc.compose(v_adj.to_gate(label='V*'), quantum, inplace=True)
+
+    qc.measure_all(add_bits=False)
+
+    return qc
+
+def llet(u: QuantumCircuit, v_adj: QuantumCircuit, i: int) -> QuantumCircuit:
+    assert u.num_qubits == v_adj.num_qubits
+
+    n = u.num_qubits
+    qc, quantum, classical = _let_base(n)
+
+    qc.compose(u.to_gate(label='U'), quantum, inplace=True)
+    qc.compose(v_adj.to_gate(label='V*'), quantum, inplace=True)
+
+    qc.measure(i, i)
+
+    return qc
+
+
 def fidelity_hst(counts: Dict[str, float]) -> float:
     assert counts
 
-    return counts['0' * len(next(iter(counts)))]
+    return counts.get('0' * len(next(iter(counts))), 0.0)
 
 def fidelity_lhst(counts_list: List[Dict[str, float]]) -> float:
     assert counts_list
