@@ -92,7 +92,7 @@ def llet(u: QuantumCircuit, v_adj: QuantumCircuit, i: int) -> QuantumCircuit:
     return qc
 
 
-def fidelity_hst(counts: Dict[str, int]) -> float:
+def fidelity_global(counts: Dict[str, int]) -> float:
     assert counts
 
     l = len(next(iter(counts)))
@@ -122,9 +122,31 @@ def fidelity_llet(counts_list: List[Dict[str, int]]) -> float:
 
     return total / n
 
-def cost_hst(fidelity: float, n: int) -> float:
-    d = 2 ** n
-    return (d + 1) * (1 - fidelity) / d
+def cost_hst(counts: Dict[str, int]) -> float:
+    """
+    Calculates the cost function according to the Hilbert-Schmidt test.
+    
+    .. math::
+        C_\\text{HST} = \\frac{d + 1}{d}(1 - \\bar{F}(U, V))
+    """
+    assert counts
 
-def cost_lhst(fidelity: float) -> float:
-    return 1 - fidelity
+    n = len(next(iter(counts))) // 2
+    d = 2 ** n
+    return (d + 1) * (1 - fidelity_global(counts)) / d
+
+def cost_lhst(counts_list: List[Dict[str, int]]) -> float:
+    return 1 - fidelity_lhst(counts_list)
+
+def cost_let(counts: Dict[str, int]) -> float:
+    return 1 - fidelity_global(counts)
+
+def cost_llet(counts_list: List[Dict[str, int]]) -> float:
+    return 1 - fidelity_llet(counts_list)
+
+def cost_hst_weighted(counts: Dict[str, int], counts_list: List[Dict[str, int]], q: float) -> float:
+    return q * cost_hst(counts) + (1 - q) * cost_lhst(counts_list)
+
+def cost_let_weighted(counts: Dict[str, int], counts_list: List[Dict[str, int]], q: float) -> float:
+    return q * cost_let(counts) + (1 - q) * cost_llet(counts_list)
+
