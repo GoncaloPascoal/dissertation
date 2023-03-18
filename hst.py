@@ -1,6 +1,9 @@
 
 from typing import Dict, List, Tuple
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
+from qiskit.result import marginal_counts
+
+from utils import counts_to_ratios
 
 def _hst_base(n: int) -> Tuple[QuantumCircuit, QuantumRegister, QuantumRegister, ClassicalRegister]:
     sys_a = QuantumRegister(n, 'SysA')
@@ -57,8 +60,8 @@ def hst(u: QuantumCircuit, v_adj: QuantumCircuit) -> QuantumCircuit:
 
 
 def _let_base(n: int) -> Tuple[QuantumCircuit, QuantumRegister, ClassicalRegister]:
-    quantum = QuantumRegister(n)
-    classical = ClassicalRegister(n)
+    quantum = QuantumRegister(n, name='Q')
+    classical = ClassicalRegister(n, name='C')
 
     return QuantumCircuit(quantum, classical), quantum, classical
 
@@ -89,22 +92,33 @@ def llet(u: QuantumCircuit, v_adj: QuantumCircuit, i: int) -> QuantumCircuit:
     return qc
 
 
-def fidelity_hst(counts: Dict[str, float]) -> float:
+def fidelity_hst(counts: Dict[str, int]) -> float:
     assert counts
 
-    return counts.get('0' * len(next(iter(counts))), 0.0)
+    l = len(next(iter(counts)))
+    return counts_to_ratios(counts).get('0' * l, 0.0)
 
-def fidelity_lhst(counts_list: List[Dict[str, float]]) -> float:
+def fidelity_lhst(counts_list: List[Dict[str, int]]) -> float:
     assert counts_list
 
     total = 0.0
     n = len(counts_list)
 
     for i, counts in enumerate(counts_list):
-        for k, v in counts.items():
-            k = k[::-1]
-            if k[i] == k[i + n] == '0':
-                total += v
+        ratios = counts_to_ratios(marginal_counts(counts, [i, i + n]))
+        total += ratios.get('00', 0.0)
+
+    return total / n
+
+def fidelity_llet(counts_list: List[Dict[str, int]]) -> float:
+    assert counts_list
+
+    total = 0.0
+    n = len(counts_list)
+
+    for i, counts in enumerate(counts_list):
+        ratios = counts_to_ratios(marginal_counts(counts, [i]))
+        total += ratios.get('0', 0.0)
 
     return total / n
 
