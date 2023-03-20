@@ -128,6 +128,8 @@ def cost_hst(counts: Dict[str, int]) -> float:
     
     .. math::
         C_\\text{HST} = \\frac{d + 1}{d}(1 - \\bar{F}(U, V))
+
+    :param counts: dictionary containing the number of times each value was measured.
     """
     assert counts
 
