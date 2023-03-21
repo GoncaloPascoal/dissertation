@@ -34,6 +34,7 @@ def lhst(u: QuantumCircuit, v_adj: QuantumCircuit, i: int) -> QuantumCircuit:
     qc.cx(i, i + n)
     qc.h(i)
 
+    qc.barrier()
     pair = [i, i + n]
     qc.measure(pair, pair)
 
