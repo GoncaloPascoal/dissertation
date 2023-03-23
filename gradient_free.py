@@ -56,7 +56,7 @@ if __name__ == '__main__':
 
     v = QuantumCircuit(1)
     v.rz(Parameter('a'), 0)
-    v.rx(pi / 2, 0)
+    v.sx(0)
     v.rz(Parameter('b'), 0)
 
     best_params, best_cost = gradient_free_hst(u, v)

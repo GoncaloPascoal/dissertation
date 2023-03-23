@@ -127,7 +127,7 @@ def gradient_based_hst_weighted(
     while i < max_iterations and grad_count < 4:
         gradient = compute_gradient(cost_function, params)
 
-        gradient_norm = np.linalg.norm(gradient)
+        gradient_norm = np.linalg.norm(gradient) ** 2
         if gradient_norm <= tolerance:
             grad_count += 1
 
@@ -156,7 +156,7 @@ if __name__ == '__main__':
 
     v = QuantumCircuit(1)
     v.rz(Parameter('a'), 0)
-    v.rx(pi / 2, 0)
+    v.sx(0)
     v.rz(Parameter('b'), 0)
 
     visualize_gradient(u, v)
