@@ -31,9 +31,9 @@ def gradient_free_hst(
     dimensions = [(-pi, pi) for _ in range(qc.num_parameters)]
 
     def cost_function(params: List[float]) -> float:
-            qc_bound = qc.bind_parameters(params)
-            counts = sim.run(qc_bound).result().get_counts()
-            return cost_hst(counts)
+        qc_bound = qc.bind_parameters(params)
+        counts = sim.run(qc_bound).result().get_counts()
+        return cost_hst(counts)
 
     best_params = [0.0 for _ in range(qc.num_parameters)]
     best_cost = 1.0
@@ -50,14 +50,15 @@ def gradient_free_hst(
 
     return best_params, best_cost
 
-u = QuantumCircuit(1)
-u.h(0)
+if __name__ == '__main__':
+    u = QuantumCircuit(1)
+    u.h(0)
 
-v = QuantumCircuit(1)
-v.rz(Parameter('a'), 0)
-v.rx(pi / 2, 0)
-v.rz(Parameter('b'), 0)
+    v = QuantumCircuit(1)
+    v.rz(Parameter('a'), 0)
+    v.rx(pi / 2, 0)
+    v.rz(Parameter('b'), 0)
 
-best_params, best_cost = gradient_free_hst(u, v)
-best_params_pi = [f'{p / pi:4f}π' for p in best_params]
-print(f'The best parameters were {best_params_pi} with a cost of {best_cost}.')
+    best_params, best_cost = gradient_free_hst(u, v)
+    best_params_pi = [f'{p / pi:4f}π' for p in best_params]
+    print(f'The best parameters were {best_params_pi} with a cost of {best_cost}.')
