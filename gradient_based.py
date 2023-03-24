@@ -8,9 +8,6 @@ import numpy as np
 
 from qiskit_aer import AerSimulator
 from qiskit import QuantumCircuit, transpile
-from qiskit.algorithms.gradients import ParamShiftEstimatorGradient
-from qiskit.primitives import Estimator
-from qiskit.quantum_info import SparsePauliOp
 
 from qiskit.circuit import Parameter
 from rich import print
@@ -77,7 +74,7 @@ def visualize_gradient(u: QuantumCircuit, v: QuantumCircuit, samples: int = 17):
     assert v.num_parameters == 2
 
     cost_function = _create_cost_function(u, v, 0.5, 1.0e-3)
-    fig, ax = plt.subplots()
+    _, ax = plt.subplots()
 
     x, y, u, v, cost = [], [], [], [], []
     param_values = np.linspace(-pi, pi, samples)

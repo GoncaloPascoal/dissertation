@@ -1,12 +1,12 @@
 
-from typing import Any, Dict, List, Tuple
+from typing import Dict, List, Tuple
 
 import gymnasium as gym
 from gymnasium import spaces
 
 from ray.rllib.algorithms import Algorithm
+from ray.rllib.algorithms.apex_dqn import ApexDQN
 from ray.rllib.algorithms.dqn import DQN, DQNConfig
-from ray.rllib.env.env_context import EnvContext
 from ray.rllib.utils.schedules import PiecewiseSchedule
 
 from qiskit import QuantumCircuit
@@ -27,12 +27,13 @@ class CircuitEnv(gym.Env):
         return (action[0].name not in {'delay', 'id', 'reset'} and
             action[0].num_clbits == 0)
 
-    def __init__(self, context: Dict[Any, Any]):
+    def __init__(self, context: Dict):
         self.u = context['u']
         self.v = QuantumCircuit(self.u.num_qubits)
         self.num_params = 0
         self.depth = 0
         self.max_depth = context['max_depth']
+        self.cx_penalty_weight = context.get('cx_penalty_weight', 0.0)
 
         self.actions: List[CircuitAction] = list(filter(
             CircuitEnv._is_valid_action,
@@ -65,7 +66,7 @@ class CircuitEnv(gym.Env):
         if terminated:
             # Optimize continuous parameters using gradient descent
             params, cost = gradient_based_hst_weighted(self.u, self.v)
-            reward = 1.0 - cost
+            reward = self._reward(cost)
 
         return (action, self.depth), reward, terminated, False, {}
 
@@ -78,14 +79,23 @@ class CircuitEnv(gym.Env):
 
         return (-1, self.depth), {}
 
+    def _reward(self, cost: float) -> float:
+        instructions = self.v.data
+        n_total = len(instructions)
+        n_cx = len([i for i in instructions if i.operation.name == 'cx'])
+        cx_penalty = self.cx_penalty_weight * n_cx / n_total
+
+        return 1 - cost - cx_penalty
+
 def double_dqn(
     u: QuantumCircuit,
     actions: List[CircuitAction],
     max_depth: int,
     epsilon_greedy_episodes: List[Tuple[float, int]],
-    learning_rate: float,
-    discount_factor: float,
-    batch_size: int,
+    learning_rate: float = 0.02,
+    discount_factor: float = 0.9,
+    batch_size: int = 32,
+    cx_penalty_weight: float = 0.0,
 ) -> DQN:
 
     # Construct epsilon greedy exploration schedule as a step function
@@ -100,10 +110,10 @@ def double_dqn(
         .training(
             lr=learning_rate,
             gamma=discount_factor,
-            train_batch_size=32,
+            train_batch_size=batch_size,
             double_q=True,
         )
-        .rollouts(num_rollout_workers=1)
+        .rollouts(num_rollout_workers=6)
         .resources(num_gpus=0)
         .framework('torch')
         .debugging(log_level='INFO')
@@ -113,17 +123,19 @@ def double_dqn(
                 'u': u,
                 'actions': actions,
                 'max_depth': max_depth,
+                'cx_penalty_weight': cx_penalty_weight,
             },
         )
         .exploration(
             exploration_config={
                 'type': 'EpsilonGreedy',
+                # TODO: Fix problem with epsilon schedule
                 # 'epsilon_schedule': PiecewiseSchedule(endpoints),
             }
         )
     )
 
-    return DQN(config)
+    return ApexDQN(config)
 
 
 if __name__ == '__main__':
@@ -131,7 +143,7 @@ if __name__ == '__main__':
     u.h(0)
 
     sx = SXGate()
-    rz = RZGate(Parameter('l'))
+    rz = RZGate(Parameter('a'))
     cx = CXGate()
 
     actions = [
@@ -144,11 +156,8 @@ if __name__ == '__main__':
     ]
 
     model = double_dqn(
-        u, 
+        u,
         actions,
         3,
         [(1.0, 100), (0.5, 50), (0.1, 50)],
-        0.02,
-        0.9,
-        32,
     )
