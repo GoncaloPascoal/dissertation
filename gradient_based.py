@@ -1,12 +1,13 @@
 
 from math import pi
-from typing import Callable, Tuple, List
+from typing import Callable, Optional, Tuple, List
 
 import matplotlib.pyplot as plt
 
 import numpy as np
 
 from qiskit_aer import AerSimulator
+from qiskit_aer.noise import NoiseModel
 from qiskit import QuantumCircuit, transpile
 
 from qiskit.circuit import Parameter
@@ -19,10 +20,11 @@ def _create_cost_function(
     v: QuantumCircuit,
     q: float,
     sample_precision: float,
+    noise_model: Optional[NoiseModel] = None,
 ) -> Callable[[np.ndarray], float]:
     v_adj = v.inverse()
 
-    sim = AerSimulator(shots=int(1 / sample_precision))
+    sim = AerSimulator(shots=int(1 / sample_precision), noise_model=noise_model)
     qc_hst = transpile(hst(u, v_adj), sim)
     qc_lhst = transpile([lhst(u, v_adj, i) for i in range(u.num_qubits)], sim)
 
@@ -70,26 +72,39 @@ def compute_gradient(
 
     return np.array(gradient)
 
-def visualize_gradient(u: QuantumCircuit, v: QuantumCircuit, samples: int = 17):
-    assert v.num_parameters == 2
+def visualize_gradient(
+    u: QuantumCircuit,
+    v: QuantumCircuit,
+    q: float = 1.0,
+    samples: int = 17,
+    base_params: Optional[np.ndarray] = None,
+    param_indices: Tuple[int, int] = (0, 1),
+):
+    assert v.num_parameters >= 2
 
-    cost_function = _create_cost_function(u, v, 0.5, 1.0e-3)
-    _, ax = plt.subplots()
+    if not base_params:
+        base_params = np.zeros((v.num_parameters,))
+
+    assert len(base_params) == v.num_parameters
+
+    cost_function = _create_cost_function(u, v, q, 1.0e-3)
+    ax = plt.axes()
 
     x, y, u, v, cost = [], [], [], [], []
     param_values = np.linspace(-pi, pi, samples)
 
     for theta_0 in param_values:
         for theta_1 in param_values:
-            params = np.array([theta_0, theta_1])
-            gradient = compute_gradient(cost_function, params)
+            base_params[param_indices[0]] = theta_0
+            base_params[param_indices[1]] = theta_1
+            gradient = compute_gradient(cost_function, base_params)
             
             x.append(theta_0)
             y.append(theta_1)
-            u.append(-gradient[0])
-            v.append(-gradient[1])
+            u.append(-gradient[param_indices[0]])
+            v.append(-gradient[param_indices[1]])
 
-            cost.append(cost_function(params))
+            cost.append(cost_function(base_params))
 
     ax.quiver(x, y, u, v, angles='xy', scale_units='xy', scale=1)
     ax.scatter(x, y, c=cost, cmap='inferno')
@@ -97,7 +112,39 @@ def visualize_gradient(u: QuantumCircuit, v: QuantumCircuit, samples: int = 17):
     ax.set_yticks(param_values)
 
     plt.show()
-    
+
+def visualize_cost_function(
+    u: QuantumCircuit,
+    v: QuantumCircuit,
+    q: float = 1.0,
+    samples: int = 17,
+    base_params: Optional[np.ndarray] = None,
+    param_indices: Tuple[int, int] = (0, 1),
+):
+    assert v.num_parameters >= 2
+
+    if not base_params:
+        params = np.zeros((v.num_parameters,))
+    else:
+        params = base_params.copy()
+
+    assert len(params) == v.num_parameters
+
+    cost_function = _create_cost_function(u, v, q, 1e-3)
+    ax = plt.axes(projection='3d')
+
+    @np.vectorize
+    def f(x: float, y: float) -> float:
+        params[param_indices[0]] = x
+        params[param_indices[1]] = y
+        return cost_function(params)
+
+    param_values = np.linspace(-pi, pi, samples)
+    x, y = np.meshgrid(param_values, param_values)
+
+    ax.plot_surface(x, y, f(x, y), cmap='inferno')
+    plt.show()
+
 
 def gradient_based_hst_weighted(
     u: QuantumCircuit,
@@ -106,13 +153,14 @@ def gradient_based_hst_weighted(
     tolerance: float = 0.01,
     max_iterations: int = 50,
     sample_precision: float = 1.0e-3,
+    noise_model: Optional[NoiseModel] = None,
 ) -> Tuple[List[float], float]:
     assert 0 < tolerance < 1
     assert 0 <= q <= 1
     assert max_iterations > 0
     assert sample_precision > 0
 
-    cost_function = _create_cost_function(u, v, q, sample_precision)
+    cost_function = _create_cost_function(u, v, q, sample_precision, noise_model)
 
     params = np.array([0.0 for _ in range(v.num_parameters)])
     cost = cost_function(params)
