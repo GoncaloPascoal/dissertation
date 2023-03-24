@@ -128,15 +128,11 @@ def cost_hst(counts: Dict[str, int]) -> float:
     Calculates the cost function according to the Hilbert-Schmidt test.
     
     .. math::
-        C_\\text{HST} = \\frac{d + 1}{d}(1 - \\bar{F}(U, V))
+        C_\\text{HST} = 1 - F_\\text{HST}(U, V)
 
     :param counts: dictionary containing the number of times each value was measured.
     """
-    assert counts
-
-    n = len(next(iter(counts))) // 2
-    d = 2 ** n
-    return (d + 1) * (1 - fidelity_global(counts)) / d
+    return 1 - fidelity_global(counts)
 
 def cost_lhst(counts_list: List[Dict[str, int]]) -> float:
     return 1 - fidelity_lhst(counts_list)
