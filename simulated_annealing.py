@@ -1,37 +1,66 @@
-
 import random
 
+from math import exp
+
+from enum import auto, Enum
 from typing import Callable, Sequence, Tuple
 
-from qiskit import QuantumCircuit, transpile
+from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter, CircuitInstruction, Instruction
 from qiskit.circuit.library import CXGate, SXGate, RZGate
-
-from qiskit_aer import AerSimulator
+from qiskit.converters import circuit_to_dag, dag_to_circuit
 
 from rich import print
 
 from rl import CircuitAction
 from gradient_based import gradient_based_hst_weighted
 
-def _change_instruction(qc: QuantumCircuit, idx: int, instruction: Instruction):
-    old = qc.data[idx]
-    qc.data[idx] = CircuitInstruction(instruction, old.qubits, old.clbits)
+class NeighborhoodType(Enum):
+    ADD_INSTRUCTION = auto()
+    CHANGE_INSTRUCTION = auto()
+    CHANGE_QUBITS = auto()
+    REMOVE_INSTRUCTION = auto()
+    SWAP_INSTRUCTIONS = auto()
 
-def _change_qubits(qc: QuantumCircuit, idx: int, indices: Sequence[int]):
-    qubits = tuple(qc.qubits[i] for i in indices)
-    old = qc.data[idx]
-    qc.data[idx] = CircuitInstruction(old.operation, qubits, old.clbits)
+def _change_instruction(qc: QuantumCircuit, idx: int, instruction: Instruction) -> QuantumCircuit:
+    dag = circuit_to_dag(qc)
+    dag.substitute_node(dag.op_nodes()[idx], instruction, inplace=True)
+    return dag_to_circuit(dag)
 
-def _remove_instruction(qc: QuantumCircuit, idx: int):
-    qc.data.pop(idx)
+def _change_qubits(qc: QuantumCircuit, idx: int, qubits: Sequence[int]) -> QuantumCircuit:
+    dag = circuit_to_dag(qc)
+    dag.op_nodes()[idx].qargs = tuple(qc.qubits[i] for i in qubits)
+    return dag_to_circuit(dag)
 
-def _add_instruction(qc: QuantumCircuit, idx: int, instruction: Instruction, qubit_indices: Sequence[int]):
-    qubits = tuple(qc.qubits[i] for i in qubit_indices)
-    qc.data.insert(idx, CircuitInstruction(instruction, qubit_indices))
+def _remove_instruction(qc: QuantumCircuit, idx: int) -> QuantumCircuit:
+    dag = circuit_to_dag(qc)
+    dag.remove_op_node(dag.op_nodes()[idx])
+    return dag_to_circuit(dag)
 
-def _swap_instructions(qc: QuantumCircuit, idx_a: int, idx_b: int):
-    qc.data[idx_a], qc.data[idx_b] = qc.data[idx_b], qc.data[idx_a]
+def _add_instruction(qc: QuantumCircuit, idx: int, new_instruction: Instruction, qubits: Sequence[int]) -> QuantumCircuit:
+    new_qc = qc.copy_empty_like()
+
+    if new_instruction.is_parameterized():
+        new_instruction = new_instruction.copy()
+        new_instruction.params = [Parameter(f'p{random.randrange(1_000_000)}') for _ in new_instruction.params]
+
+    for i, instruction in enumerate(qc.data):
+        if i == idx:
+            new_qc.append(new_instruction, qubits)
+        new_qc.append(instruction)
+
+    return new_qc
+
+def _swap_instructions(qc: QuantumCircuit, idx_a: int, idx_b: int) -> QuantumCircuit:
+    dag = circuit_to_dag(qc)
+    op_nodes = dag.op_nodes()
+
+    node_a, node_b = op_nodes[idx_a], op_nodes[idx_b]
+    temp_a = node_a.op
+    dag.substitute_node(node_a, node_b.op, inplace=True)
+    dag.substitute_node(node_b, temp_a, inplace=True)
+
+    return dag_to_circuit(dag)
 
 class SimulatedAnnealing:
     ContinuousOptimizationFunction = Callable[
@@ -49,17 +78,24 @@ class SimulatedAnnealing:
 
         for _ in range(num_instructions):
             instruction, qubits = random.choice(self.native_instructions)
+
+            # TODO: Refactor parameter renaming
+            if instruction.is_parameterized():
+                instruction = instruction.copy()
+                instruction.params = [Parameter(f'p{random.randrange(1_000_000)}') for _ in instruction.params]
+
             qc.append(instruction, qubits)
 
         return qc
 
-    # TODO: Temperature and annealing schedule. Replace CircuitAction in signature
+    # TODO: Annealing schedule. Replace CircuitAction in signature
     def __init__(
         self,
         u: QuantumCircuit,
         native_instructions: Sequence[CircuitAction],
         continuous_optimization: ContinuousOptimizationFunction,
         max_iterations: int,
+        initial_temperature: float = 0.2,
     ):
         assert max_iterations > 0
 
@@ -67,38 +103,86 @@ class SimulatedAnnealing:
         self.native_instructions = native_instructions
         self.continuous_optimization = lambda v: continuous_optimization(self.u, v)
         self.max_iterations = max_iterations
+        self.temperature = initial_temperature
 
         self.v = self._generate_random_circuit(u.num_qubits, 3)
         self.best_v = self.v
         self.best_params, self.best_cost = self.continuous_optimization(self.v)
+        self.current_cost = self.best_cost
 
     def _generate_neighbor(self) -> QuantumCircuit:
-        neighbor = self.v.copy()
-        # TODO: generate neighbor
+        types = list(NeighborhoodType)
+        num_instructions = len(self.v)
+
+        # TODO: Remove
+        types.remove(NeighborhoodType.CHANGE_INSTRUCTION)
+        types.remove(NeighborhoodType.CHANGE_QUBITS)
+        types.remove(NeighborhoodType.SWAP_INSTRUCTIONS)
+
+        if num_instructions == 1:
+            types.remove(NeighborhoodType.REMOVE_INSTRUCTION)
+            types.remove(NeighborhoodType.SWAP_INSTRUCTIONS)
+
+        n_type = random.choice(types)
+        match n_type:
+            case NeighborhoodType.ADD_INSTRUCTION:
+                new_instruction, qubits = random.choice(self.native_instructions)
+
+                neighbor = _add_instruction(
+                    self.v,
+                    random.randrange(num_instructions + 1),
+                    new_instruction,
+                    qubits,
+                )
+            case NeighborhoodType.CHANGE_INSTRUCTION:
+                pass
+            case NeighborhoodType.CHANGE_QUBITS:
+                idx = random.randrange(num_instructions)
+                instruction: CircuitInstruction = self.v.data[idx]
+
+                old_qubits = tuple(map(lambda q: q.index, instruction.qubits))
+                filtered_instructions = list(filter(
+                    lambda i: i[0].name == instruction.operation.name and i[1] != old_qubits,
+                    self.native_instructions
+                ))
+                _, new_qubits = random.choice(filtered_instructions)
+
+                neighbor = _change_qubits(self.v, idx, new_qubits)
+            case NeighborhoodType.REMOVE_INSTRUCTION:
+                idx = random.randrange(num_instructions)
+                neighbor = _remove_instruction(self.v, idx)
+            case NeighborhoodType.SWAP_INSTRUCTIONS:
+                idx_a, idx_b = random.sample(range(num_instructions), 2)
+                neighbor = _swap_instructions(self.v, idx_a, idx_b)
+
         return neighbor
 
     def run(self) -> Tuple[QuantumCircuit, Sequence[float], float]:
         for _ in range(self.max_iterations):
-            # TODO: simulated annealing algorithm
-            pass
+            neighbor = self._generate_neighbor()
+            params, cost = self.continuous_optimization(neighbor)
+
+            if cost <= self.best_cost:
+                self.best_v, self.best_params, self.best_cost = neighbor, params, cost
+
+            cost_penalty = cost - self.current_cost
+            if cost_penalty <= 0 or random.random() <= exp(-cost_penalty / self.temperature):
+                self.v, self.current_cost = neighbor, cost
+
+            # TODO: Annealing schedule
 
         return self.best_v, self.best_params, self.best_cost
 
 if __name__ == '__main__':
-    u = QuantumCircuit(2)
+    u = QuantumCircuit(1)
     u.h(0)
 
     sx = SXGate()
     rz = RZGate(Parameter('a'))
-    cx = CXGate()
 
     native_instructions = [
         (sx, (0,)),
-        (sx, (1,)),
         (rz, (0,)),
-        (rz, (1,)),
-        (cx, (0, 1)),
-        (cx, (1, 0)),
     ]
 
     def continuous_optimization(
@@ -108,3 +192,7 @@ if __name__ == '__main__':
         return gradient_based_hst_weighted(u, v)
 
     algo = SimulatedAnnealing(u, native_instructions, continuous_optimization, 50)
+
+    circuit, params, cost = algo.run()
+    print(circuit.draw())
+    print(params, cost)
