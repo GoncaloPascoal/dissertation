@@ -1,6 +1,6 @@
 import random
 
-from math import exp
+from math import exp, pi
 
 from enum import auto, Enum
 from typing import Callable, Sequence, Tuple
@@ -88,7 +88,7 @@ class SimulatedAnnealing:
 
         return qc
 
-    # TODO: Annealing schedule. Replace CircuitAction in signature
+    # TODO: Replace CircuitAction in signature
     def __init__(
         self,
         u: QuantumCircuit,
@@ -96,6 +96,7 @@ class SimulatedAnnealing:
         continuous_optimization: ContinuousOptimizationFunction,
         max_iterations: int,
         initial_temperature: float = 0.2,
+        beta: float = 1.5,
     ):
         assert max_iterations > 0
 
@@ -103,15 +104,17 @@ class SimulatedAnnealing:
         self.native_instructions = native_instructions
         self.continuous_optimization = lambda v: continuous_optimization(self.u, v)
         self.max_iterations = max_iterations
-        self.temperature = initial_temperature
+        self.initial_temperature = initial_temperature
+        self.beta = beta
 
         self.v = self._generate_random_circuit(u.num_qubits, 3)
         self.best_v = self.v
         self.best_params, self.best_cost = self.continuous_optimization(self.v)
         self.current_cost = self.best_cost
+        self.temperature = initial_temperature
 
     def _generate_neighbor(self) -> QuantumCircuit:
-        types = list(NeighborhoodType)
+        types = set(NeighborhoodType)
         num_instructions = len(self.v)
 
         # TODO: Remove
@@ -120,10 +123,10 @@ class SimulatedAnnealing:
         types.remove(NeighborhoodType.SWAP_INSTRUCTIONS)
 
         if num_instructions == 1:
-            types.remove(NeighborhoodType.REMOVE_INSTRUCTION)
-            types.remove(NeighborhoodType.SWAP_INSTRUCTIONS)
+            types.discard(NeighborhoodType.REMOVE_INSTRUCTION)
+            types.discard(NeighborhoodType.SWAP_INSTRUCTIONS)
 
-        n_type = random.choice(types)
+        n_type = random.choice(list(types))
         match n_type:
             case NeighborhoodType.ADD_INSTRUCTION:
                 new_instruction, qubits = random.choice(self.native_instructions)
@@ -158,24 +161,28 @@ class SimulatedAnnealing:
         return neighbor
 
     def run(self) -> Tuple[QuantumCircuit, Sequence[float], float]:
-        for _ in range(self.max_iterations):
+        for i in range(1, self.max_iterations + 1):
+            # Generate neighbor and optimize continuous parameters
             neighbor = self._generate_neighbor()
             params, cost = self.continuous_optimization(neighbor)
 
+            # Update best solution
             if cost <= self.best_cost:
                 self.best_v, self.best_params, self.best_cost = neighbor, params, cost
 
+            # Determine probability of accepting neighboring solution
             cost_penalty = cost - self.current_cost
             if cost_penalty <= 0 or random.random() <= exp(-cost_penalty / self.temperature):
                 self.v, self.current_cost = neighbor, cost
 
-            # TODO: Annealing schedule
+            # Annealing schedule
+            self.temperature = self.initial_temperature * pow(1.0 - i / self.max_iterations, self.beta)
 
         return self.best_v, self.best_params, self.best_cost
 
 if __name__ == '__main__':
     u = QuantumCircuit(1)
-    u.h(0)
+    u.t(0)
 
     sx = SXGate()
     rz = RZGate(Parameter('a'))
@@ -195,4 +202,6 @@ if __name__ == '__main__':
 
     circuit, params, cost = algo.run()
     print(circuit.draw())
-    print(params, cost)
+
+    params_pi = [f'{p / pi:4f}π' for p in params]
+    print(f'The best parameters were {params_pi} with a cost of {cost}.')
