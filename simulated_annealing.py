@@ -3,7 +3,7 @@ import random
 from math import exp, pi
 
 from enum import auto, Enum
-from typing import Callable, Sequence, Tuple
+from typing import Callable, List, Sequence, Tuple
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter, CircuitInstruction, Instruction
@@ -65,7 +65,7 @@ def _swap_instructions(qc: QuantumCircuit, idx_a: int, idx_b: int) -> QuantumCir
 class SimulatedAnnealing:
     ContinuousOptimizationFunction = Callable[
         [QuantumCircuit, QuantumCircuit],
-        Tuple[Sequence[float], float]
+        Tuple[List[float], float]
     ]
 
     def _is_valid_instruction(self, instruction: CircuitAction) -> bool:
@@ -195,7 +195,7 @@ if __name__ == '__main__':
     def continuous_optimization(
         u: QuantumCircuit,
         v: QuantumCircuit,
-    ) -> Tuple[Sequence[float], float]:
+    ) -> Tuple[List[float], float]:
         return gradient_based_hst_weighted(u, v)
 
     algo = SimulatedAnnealing(u, native_instructions, continuous_optimization, 50)
