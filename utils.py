@@ -1,5 +1,6 @@
 
-from typing import Dict
+from math import pi
+from typing import Dict, List, Iterable
 
 from qiskit import QuantumCircuit
 from qiskit.converters import circuit_to_dag, dag_to_circuit
@@ -12,7 +13,7 @@ def counts_to_ratios(counts: Dict[str, int]) -> Dict[str, float]:
 def remove_instruction(qc: QuantumCircuit, idx: int) -> QuantumCircuit:
     """
     Remove the instruction at index ``idx`` from the circuit, returning a
-    new circuit.
+new circuit.
     """
     dag = circuit_to_dag(qc)
     dag.remove_op_node(dag.op_nodes(include_directives=False)[idx])
@@ -20,7 +21,7 @@ def remove_instruction(qc: QuantumCircuit, idx: int) -> QuantumCircuit:
 
 def remove_parametrized_instruction(qc: QuantumCircuit, idx: int) -> QuantumCircuit:
     """
-    Remove the ``idx``th parametrized instruction from the circuit, returning a
+    Remove the parametrized instruction at index ``idx`` from the circuit, returning a
     new circuit.
     """
     dag = circuit_to_dag(qc)
@@ -30,3 +31,6 @@ def remove_parametrized_instruction(qc: QuantumCircuit, idx: int) -> QuantumCirc
     ))
     dag.remove_op_node(parametrized_op_nodes[idx])
     return dag_to_circuit(dag)
+
+def normalize_angles(angles: Iterable[float]) -> List[float]:
+    return list(map(lambda theta: theta % (2 * pi), angles))

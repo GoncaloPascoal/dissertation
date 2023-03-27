@@ -14,6 +14,7 @@ from qiskit.circuit import Parameter
 from rich import print
 
 from hst import hst, lhst, cost_hst_weighted
+from utils import normalize_angles
 
 def _create_cost_function(
     u: QuantumCircuit,
@@ -196,16 +197,28 @@ def gradient_based_hst_weighted(
     return params.tolist(), cost
 
 if __name__ == '__main__':
-    u = QuantumCircuit(1)
-    u.h(0)
+    # u = QuantumCircuit(1)
+    # u.h(0)
 
-    v = QuantumCircuit(1)
-    v.rz(Parameter('a'), 0)
-    v.sx(0)
-    v.rz(Parameter('b'), 0)
+    # v = QuantumCircuit(1)
+    # v.rz(Parameter('a'), 0)
+    # v.sx(0)
+    # v.rz(Parameter('b'), 0)
 
-    visualize_gradient(u, v)
+    # visualize_gradient(u, v)
 
-    best_params, best_cost = gradient_based_hst_weighted(u, v)
-    best_params_pi = [f'{p / pi:4f}π' for p in best_params]
+    # Controlled Hadamard
+    u = QuantumCircuit(2)
+    u.ch(0, 1)
+
+    v = QuantumCircuit(2)
+    v.rz(Parameter('a'), 1)
+    v.sx(1)
+    v.rz(Parameter('b'), 1)
+    v.cx(0, 1)
+    v.rz(Parameter('c'), 1)
+    v.sx(1)
+
+    best_params, best_cost = gradient_based_hst_weighted(u, v, q=0.5, tolerance=1e-8)
+    best_params_pi = [f'{p / pi:4f}π' for p in normalize_angles(best_params)]
     print(f'The best parameters were {best_params_pi} with a cost of {best_cost}.')
