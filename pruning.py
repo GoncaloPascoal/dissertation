@@ -6,19 +6,12 @@ import numpy as np
 
 from qiskit import QuantumCircuit
 
-from utils import remove_parametrized_instruction
-
-# TODO: Extract type alias
-from qiskit_aer import AerSimulator
-from qiskit.circuit import Parameter
-from simulated_annealing import SimulatedAnnealing
-
-from gradient_based import gradient_based_hst_weighted
+from utils import ContinuousOptimizationFunction, remove_parametrized_instruction
 
 def iterative_pruning(
     u: QuantumCircuit,
     v: QuantumCircuit,
-    continuous_optimization: SimulatedAnnealing.ContinuousOptimizationFunction,
+    continuous_optimization: ContinuousOptimizationFunction,
     tolerance: float = 0.01,
 ) -> Tuple[QuantumCircuit, Sequence[float], float]:
     def select_param(params: Sequence[float]) -> int:
@@ -49,6 +42,11 @@ def iterative_pruning(
     return v, params, cost
 
 if __name__ == '__main__':
+    from qiskit_aer import AerSimulator
+    from qiskit.circuit import Parameter
+
+    from gradient_based import gradient_based_hst_weighted
+
     u = QuantumCircuit(1)
     v = QuantumCircuit(1)
     

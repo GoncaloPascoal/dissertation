@@ -14,7 +14,7 @@ from qiskit.circuit import Parameter
 from rich import print
 
 from hst import hst, lhst, cost_hst_weighted
-from utils import normalize_angles
+from utils import ContinuousOptimizationResult, normalize_angles
 
 def _create_cost_function(
     u: QuantumCircuit,
@@ -155,7 +155,7 @@ def gradient_based_hst_weighted(
     max_iterations: int = 50,
     sample_precision: float = 1.0e-3,
     noise_model: Optional[NoiseModel] = None,
-) -> Tuple[List[float], float]:
+) -> ContinuousOptimizationResult:
     assert 0 < tolerance < 1
     assert 0 <= q <= 1
     assert max_iterations > 0
@@ -194,7 +194,7 @@ def gradient_based_hst_weighted(
 
         i += 1
 
-    return params.tolist(), cost
+    return ContinuousOptimizationResult(params.tolist(), cost)
 
 if __name__ == '__main__':
     # u = QuantumCircuit(1)

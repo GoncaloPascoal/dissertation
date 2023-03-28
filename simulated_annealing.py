@@ -13,6 +13,8 @@ from qiskit.circuit.library import CXGate, SXGate, RZGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGOpNode
 
+from utils import ContinuousOptimizationFunction, ContinuousOptimizationResult
+
 from rich import print
 
 from rl import CircuitAction
@@ -92,11 +94,6 @@ def _swap_instructions(qc: QuantumCircuit, idx_a: int, idx_b: int) -> QuantumCir
     return dag_to_circuit(dag)
 
 class SimulatedAnnealing:
-    ContinuousOptimizationFunction = Callable[
-        [QuantumCircuit, QuantumCircuit],
-        Tuple[List[float], float]
-    ]
-
     def _is_valid_instruction(self, instruction: CircuitAction) -> bool:
         return (instruction[0].name not in {'delay', 'id', 'reset'} and
             instruction[0].num_clbits == 0 and
@@ -223,7 +220,7 @@ if __name__ == '__main__':
     def continuous_optimization(
         u: QuantumCircuit,
         v: QuantumCircuit,
-    ) -> Tuple[List[float], float]:
+    ) -> ContinuousOptimizationResult:
         return gradient_based_hst_weighted(u, v)
 
     algo = SimulatedAnnealing(u, native_instructions, continuous_optimization, 50)

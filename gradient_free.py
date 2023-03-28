@@ -7,10 +7,8 @@ from qiskit_aer import AerSimulator
 from qiskit import QuantumCircuit, transpile
 import skopt
 
-from qiskit.circuit import Parameter
-from rich import print
-
 from hst import hst, cost_hst
+from utils import ContinuousOptimizationResult
 
 def gradient_free_hst(
     u: QuantumCircuit,
@@ -19,7 +17,7 @@ def gradient_free_hst(
     max_starting_points: int = 10,
     max_iterations: int = 50,
     sample_precision: float = 1.25e-4,
-) -> Tuple[List[float], float]:
+) -> ContinuousOptimizationResult:
     """Performs gradient-free optimization for QAQC using the HST."""
     assert 0 < tolerance < 1
     assert max_starting_points > 0
@@ -48,9 +46,12 @@ def gradient_free_hst(
             best_params, best_cost = params, cost
         i += 1
 
-    return best_params, best_cost
+    return ContinuousOptimizationResult(best_params, best_cost)
 
 if __name__ == '__main__':
+    from qiskit.circuit import Parameter
+    from rich import print
+
     u = QuantumCircuit(1)
     u.h(0)
 
