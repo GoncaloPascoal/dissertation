@@ -1,3 +1,5 @@
+
+import itertools
 import random
 
 from math import exp, pi
@@ -9,6 +11,7 @@ from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter, CircuitInstruction, Instruction
 from qiskit.circuit.library import CXGate, SXGate, RZGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
+from qiskit.dagcircuit import DAGOpNode
 
 from rich import print
 
@@ -21,6 +24,32 @@ class NeighborhoodType(Enum):
     CHANGE_QUBITS = auto()
     REMOVE_INSTRUCTION = auto()
     SWAP_INSTRUCTIONS = auto()
+
+def _resolve_random_identity(qc: QuantumCircuit, native_instructions: Sequence[CircuitAction]) -> QuantumCircuit:
+    dag = circuit_to_dag(qc)
+
+    options = []
+    for layer in dag.layers():
+        op_node = layer['graph'].op_nodes(include_directives=False)[0]
+        active_qubits = [qc.find_bit(q).index for q in itertools.chain(*layer['partition'])]
+        idle_qubits = set(range(qc.num_qubits)).difference(active_qubits)
+
+        for instruction, qubits in native_instructions:
+            if idle_qubits.issuperset(qubits):
+                options.append((op_node, instruction, qubits))
+
+    if not options:
+        raise ValueError('Circuit contains no resolvable identities.')
+
+    op_node, new_instruction, qubits = random.choice(options)
+
+    idx = 0
+    for i, n in enumerate(dag.op_nodes(include_directives=False)):
+        if DAGOpNode.semantic_eq(n, op_node):
+            idx = i
+            break
+
+    return _add_instruction(dag_to_circuit(dag), idx, new_instruction, qubits)
 
 def _change_instruction(qc: QuantumCircuit, idx: int, instruction: Instruction) -> QuantumCircuit:
     dag = circuit_to_dag(qc)
@@ -119,8 +148,10 @@ class SimulatedAnnealing:
 
         # TODO: Remove
         types.remove(NeighborhoodType.CHANGE_INSTRUCTION)
-        types.remove(NeighborhoodType.CHANGE_QUBITS)
         types.remove(NeighborhoodType.SWAP_INSTRUCTIONS)
+
+        if self.v.num_qubits <= 1:
+            types.discard(NeighborhoodType.CHANGE_QUBITS)
 
         if num_instructions == 1:
             types.discard(NeighborhoodType.REMOVE_INSTRUCTION)
@@ -129,25 +160,22 @@ class SimulatedAnnealing:
         n_type = random.choice(list(types))
         match n_type:
             case NeighborhoodType.ADD_INSTRUCTION:
-                new_instruction, qubits = random.choice(self.native_instructions)
-
-                neighbor = _add_instruction(
-                    self.v,
-                    random.randrange(num_instructions + 1),
-                    new_instruction,
-                    qubits,
-                )
+                try:
+                    neighbor = _resolve_random_identity(self.v, self.native_instructions)
+                except ValueError:
+                    new_instruction, qubits = random.choice(self.native_instructions)
+                    neighbor = self.v.compose(new_instruction, qubits)
             case NeighborhoodType.CHANGE_INSTRUCTION:
                 pass
             case NeighborhoodType.CHANGE_QUBITS:
                 idx = random.randrange(num_instructions)
                 instruction: CircuitInstruction = self.v.data[idx]
 
-                old_qubits = tuple(map(lambda q: q.index, instruction.qubits))
-                filtered_instructions = list(filter(
-                    lambda i: i[0].name == instruction.operation.name and i[1] != old_qubits,
-                    self.native_instructions
-                ))
+                old_qubits = tuple(self.v.find_bit(q).index for q in instruction.qubits)
+                filtered_instructions = [
+                    i for i in self.native_instructions
+                    if i[0].name == instruction.operation.name and i[1] != old_qubits
+                ]
                 _, new_qubits = random.choice(filtered_instructions)
 
                 neighbor = _change_qubits(self.v, idx, new_qubits)

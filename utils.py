@@ -13,7 +13,7 @@ def counts_to_ratios(counts: Dict[str, int]) -> Dict[str, float]:
 def remove_instruction(qc: QuantumCircuit, idx: int) -> QuantumCircuit:
     """
     Remove the instruction at index ``idx`` from the circuit, returning a
-new circuit.
+    new circuit.
     """
     dag = circuit_to_dag(qc)
     dag.remove_op_node(dag.op_nodes(include_directives=False)[idx])
