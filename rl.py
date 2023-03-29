@@ -1,5 +1,5 @@
 
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -27,71 +27,79 @@ class CircuitEnv(gym.Env):
         return (action[0].name not in {'delay', 'id', 'reset'} and
             action[0].num_clbits == 0)
 
-    def __init__(self, context: Dict):
+    def __init__(self, context: Dict[str, Any]):
         self.u = context['u']
-        self.v = QuantumCircuit(self.u.num_qubits)
-        self.num_params = 0
-        self.depth = 0
         self.max_depth = context['max_depth']
         self.cx_penalty_weight = context.get('cx_penalty_weight', 0.0)
+        self.circuit_actions: List[CircuitAction] = [
+            a for a in context['actions'] if CircuitEnv._is_valid_action(a)
+        ]
+        num_circuit_actions = len(self.circuit_actions)
 
-        self.actions: List[CircuitAction] = list(filter(
-            CircuitEnv._is_valid_action,
-            context['actions']
+        self.action_space = spaces.Discrete(num_circuit_actions, start=-1)
+        self.observation_space = spaces.Tuple((
+            spaces.Discrete(num_circuit_actions + 1, start=-1),
+            spaces.Discrete(self.max_depth + 1)
         ))
-        num_actions = len(self.actions)
+        self.reward_range = (-self.cx_penalty_weight, 1.0)
 
-        self.action_space = spaces.Discrete(num_actions)
-        self.observation_space = spaces.Tuple(
-            (spaces.Discrete(num_actions + 1, start=-1), spaces.Discrete(self.max_depth + 1))
-        )
+        self.v = QuantumCircuit(self.u.num_qubits)
+        self.num_params = 0
 
     def step(self, action: int):
-        instruction, qubits = self.actions[action]
+        circuit_finished = action == -1
 
-        # Give unique name to each instruction parameter
-        if instruction.params:
-            instruction = instruction.copy()
-            new_params = []
-            for _ in instruction.params:
-                new_params.append(Parameter(f'p{self.num_params}'))
-                self.num_params += 1
-            instruction.params = new_params
+        if not circuit_finished:
+            instruction, qubits = self.circuit_actions[action]
 
-        self.v.append(instruction, qubits)
-        self.depth += 1
+            # Give unique name to each instruction parameter
+            if instruction.params:
+                instruction = instruction.copy()
+                new_params = []
+                for _ in instruction.params:
+                    new_params.append(Parameter(f'p{self.num_params}'))
+                    self.num_params += 1
+                instruction.params = new_params
+
+            self.v.append(instruction, qubits)
+            self.current_observation = (action, self.depth)
 
         reward = 0.0
-        terminated = self.depth == self.max_depth
+        terminated = self.depth == self.max_depth or circuit_finished
         if terminated:
             # Optimize continuous parameters using gradient descent
             params, cost = gradient_based_hst_weighted(self.u, self.v)
             reward = self._reward(cost)
 
-        return (action, self.depth), reward, terminated, False, {}
+        return self.current_observation, reward, terminated, False, {}
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed, options=options)
 
         self.v = QuantumCircuit(self.u.num_qubits)
         self.num_params = 0
-        self.depth = 0
+        self.current_observation = (-1, self.depth)
 
-        return (-1, self.depth), {}
+        return self.current_observation, {}
+
+    @property
+    def depth(self):
+        return len(self.v)
 
     def _reward(self, cost: float) -> float:
         instructions = self.v.data
         n_total = len(instructions)
         n_cx = len([i for i in instructions if i.operation.name == 'cx'])
-        cx_penalty = self.cx_penalty_weight * n_cx / n_total
+        cx_penalty = 0.0 if n_total == 0 else self.cx_penalty_weight * n_cx / n_total
 
         return 1 - cost - cx_penalty
 
+
 def double_dqn(
     u: QuantumCircuit,
-    actions: List[CircuitAction],
+    actions: Sequence[CircuitAction],
     max_depth: int,
-    epsilon_greedy_episodes: List[Tuple[float, int]],
+    epsilon_greedy_episodes: Sequence[Tuple[float, int]],
     learning_rate: float = 0.02,
     discount_factor: float = 0.9,
     batch_size: int = 32,
@@ -113,7 +121,12 @@ def double_dqn(
             train_batch_size=batch_size,
             double_q=True,
         )
-        .rollouts(num_rollout_workers=6)
+        .rollouts(
+            num_rollout_workers=6,
+            ignore_worker_failures=True,
+            recreate_failed_workers=True,
+            restart_failed_sub_environments=True,
+        )
         .resources(num_gpus=0)
         .framework('torch')
         .debugging(log_level='INFO')
@@ -161,3 +174,6 @@ if __name__ == '__main__':
         3,
         [(1.0, 100), (0.5, 50), (0.1, 50)],
     )
+
+    for _ in range(10):
+        model.train()
