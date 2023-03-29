@@ -14,9 +14,6 @@ from qiskit.circuit import Instruction
 
 from gradient_based import gradient_based_hst_weighted
 
-from qiskit.circuit import Parameter
-from qiskit.circuit.library import SXGate, RZGate, CXGate
-
 from rich import print
 
 CircuitAction = Tuple[Instruction, Tuple[int, ...]]
@@ -152,6 +149,9 @@ def double_dqn(
 
 
 if __name__ == '__main__':
+    from qiskit.circuit import Parameter
+    from qiskit.circuit.library import SXGate, RZGate, CXGate
+
     u = QuantumCircuit(2)
     u.h(0)
 
