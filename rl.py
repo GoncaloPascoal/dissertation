@@ -10,7 +10,7 @@ from ray.rllib.algorithms.dqn import DQN, DQNConfig
 from ray.rllib.utils.schedules import PiecewiseSchedule
 
 from qiskit import QuantumCircuit
-from qiskit.circuit import Instruction
+from qiskit.circuit import Instruction, Parameter
 
 from gradient_based import gradient_based_hst_weighted
 
@@ -33,9 +33,9 @@ class CircuitEnv(gym.Env):
         ]
         num_circuit_actions = len(self.circuit_actions)
 
-        self.action_space = spaces.Discrete(num_circuit_actions, start=-1)
+        self.action_space = spaces.Discrete(num_circuit_actions + 1)
         self.observation_space = spaces.Tuple((
-            spaces.Discrete(num_circuit_actions + 1, start=-1),
+            spaces.Discrete(num_circuit_actions + 1),
             spaces.Discrete(self.max_depth + 1)
         ))
         self.reward_range = (-self.cx_penalty_weight, 1.0)
@@ -44,10 +44,10 @@ class CircuitEnv(gym.Env):
         self.num_params = 0
 
     def step(self, action: int):
-        circuit_finished = action == -1
+        circuit_finished = action == 0
 
         if not circuit_finished:
-            instruction, qubits = self.circuit_actions[action]
+            instruction, qubits = self.circuit_actions[action - 1]
 
             # Give unique name to each instruction parameter
             if instruction.params:
@@ -75,7 +75,7 @@ class CircuitEnv(gym.Env):
 
         self.v = QuantumCircuit(self.u.num_qubits)
         self.num_params = 0
-        self.current_observation = (-1, self.depth)
+        self.current_observation = (0, self.depth)
 
         return self.current_observation, {}
 
@@ -124,7 +124,7 @@ def double_dqn(
             recreate_failed_workers=True,
             restart_failed_sub_environments=True,
         )
-        .resources(num_gpus=0)
+        .resources(num_gpus=1)
         .framework('torch')
         .debugging(log_level='INFO')
         .environment(
@@ -149,11 +149,10 @@ def double_dqn(
 
 
 if __name__ == '__main__':
-    from qiskit.circuit import Parameter
-    from qiskit.circuit.library import SXGate, RZGate, CXGate
+    from qiskit.circuit.library import SXGate, RZGate, CXGate, QFT
 
     u = QuantumCircuit(2)
-    u.h(0)
+    u.swap(0, 1)
 
     sx = SXGate()
     rz = RZGate(Parameter('a'))
