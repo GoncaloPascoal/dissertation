@@ -9,23 +9,26 @@ import numpy as np
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel
 from qiskit import QuantumCircuit, transpile
-
-from qiskit.circuit import Parameter
-from rich import print
+from qiskit.providers.backend import Backend
 
 from hst import hst, lhst, cost_hst_weighted
-from utils import ContinuousOptimizationResult, normalize_angles
+from utils import ContinuousOptimizationResult
 
 def _create_cost_function(
     u: QuantumCircuit,
     v: QuantumCircuit,
     q: float,
     sample_precision: float,
-    noise_model: Optional[NoiseModel] = None,
+    backend: Optional[Backend] = None,
 ) -> Callable[[np.ndarray], float]:
     v_adj = v.inverse()
 
-    sim = AerSimulator(shots=int(1 / sample_precision), noise_model=noise_model)
+    if backend is None:
+        sim = AerSimulator()
+    else:
+        sim = AerSimulator.from_backend(backend)
+    sim.set_option('shots', int(1 / sample_precision))
+
     qc_hst = transpile(hst(u, v_adj), sim)
     qc_lhst = transpile([lhst(u, v_adj, i) for i in range(u.num_qubits)], sim)
 
@@ -83,7 +86,7 @@ def visualize_gradient(
 ):
     assert v.num_parameters >= 2
 
-    if not base_params:
+    if base_params is None:
         base_params = np.zeros((v.num_parameters,))
 
     assert len(base_params) == v.num_parameters
@@ -109,6 +112,10 @@ def visualize_gradient(
 
     ax.quiver(x, y, u, v, angles='xy', scale_units='xy', scale=1)
     ax.scatter(x, y, c=cost, cmap='inferno')
+
+    ax.set_title('Gradient Visualization')
+    ax.set_xlabel(f'Parameter #{param_indices[0]}')
+    ax.set_ylabel(f'Parameter #{param_indices[1]}')
     ax.set_xticks(param_values)
     ax.set_yticks(param_values)
 
@@ -124,7 +131,7 @@ def visualize_cost_function(
 ):
     assert v.num_parameters >= 2
 
-    if not base_params:
+    if base_params is None:
         params = np.zeros((v.num_parameters,))
     else:
         params = base_params.copy()
@@ -144,6 +151,11 @@ def visualize_cost_function(
     x, y = np.meshgrid(param_values, param_values)
 
     ax.plot_surface(x, y, f(x, y), cmap='inferno')
+
+    ax.set_title('Cost Function Visualization')
+    ax.set_xlabel(f'Parameter #{param_indices[0]}')
+    ax.set_ylabel(f'Parameter #{param_indices[1]}')
+
     plt.show()
 
 
@@ -197,6 +209,10 @@ def gradient_based_hst_weighted(
     return ContinuousOptimizationResult(params.tolist(), cost)
 
 if __name__ == '__main__':
+    from qiskit.circuit import Parameter
+    from rich import print
+    from utils import normalize_angles
+
     # u = QuantumCircuit(1)
     # u.h(0)
 
