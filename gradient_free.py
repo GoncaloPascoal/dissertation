@@ -1,10 +1,11 @@
 
 import random
 from math import pi
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from qiskit_aer import AerSimulator
 from qiskit import QuantumCircuit, transpile
+from qiskit.providers.backend import Backend
 import skopt
 
 from hst import hst, cost_hst
@@ -17,6 +18,7 @@ def gradient_free_hst(
     max_starting_points: int = 10,
     max_iterations: int = 50,
     sample_precision: float = 1.25e-4,
+    backend: Optional[Backend] = None,
 ) -> ContinuousOptimizationResult:
     """Performs gradient-free optimization for QAQC using the HST."""
     assert 0 < tolerance < 1
@@ -24,7 +26,12 @@ def gradient_free_hst(
     assert max_iterations > 0
     assert sample_precision > 0
 
-    sim = AerSimulator(shots=int(1 / sample_precision))
+    if backend is None:
+        sim = AerSimulator()
+    else:
+        sim = AerSimulator.from_backend(backend)
+    sim.set_option('shots', int(1 / sample_precision))
+
     qc = transpile(hst(u, v.inverse()), sim)
     dimensions = [(-pi, pi) for _ in range(qc.num_parameters)]
 
