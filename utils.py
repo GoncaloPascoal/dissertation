@@ -1,6 +1,6 @@
 
 from math import pi
-from typing import Callable, Dict, List, Iterable, NamedTuple
+from typing import Callable, Dict, List, NamedTuple, Sequence
 
 from qiskit import QuantumCircuit
 from qiskit.converters import circuit_to_dag, dag_to_circuit
@@ -41,5 +41,5 @@ def remove_parametrized_instruction(qc: QuantumCircuit, idx: int) -> QuantumCirc
     dag.remove_op_node(parametrized_op_nodes[idx])
     return dag_to_circuit(dag)
 
-def normalize_angles(angles: List[float]) -> List[float]:
-    return list(map(lambda theta: theta % (2 * pi), angles))
+def normalize_angles(angles: Sequence[float]) -> List[float]:
+    return [theta % (2 * pi) for theta in angles]
