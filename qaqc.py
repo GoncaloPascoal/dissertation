@@ -8,6 +8,7 @@ import numpy as np
 from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter
 from qiskit.circuit.library import CXGate, QFT, RZGate, SXGate
+from qiskit.providers import Backend
 from qiskit.providers.fake_provider import FakeTenerife, FakeRueschlikon
 
 from rich import print
@@ -16,9 +17,8 @@ from gradient_based import gradient_based_hst_weighted
 from gradient_free import gradient_free_hst
 from simulated_annealing import SimulatedAnnealing
 
-def run_small_scale_implementation(u: QuantumCircuit):
-    ibmqx4 = FakeTenerife()
-    continuous_optimization = lambda u, v: gradient_free_hst(u, v, backend=ibmqx4)
+def run_small_scale_implementation(u: QuantumCircuit, backend: Backend, max_iterations: int):
+    continuous_optimization = lambda u, v: gradient_based_hst_weighted(u, v)
 
     print('[bold]Circuit to Compile (U)[/bold]')
     print(u.draw())
@@ -33,22 +33,12 @@ def run_small_scale_implementation(u: QuantumCircuit):
         [(sx, (q,)) for q in range(num_qubits)] +
         [(rz, (q,)) for q in range(num_qubits)] +
         [
-            (cx, tuple(qp)) for qp in ibmqx4.configuration().coupling_map
+            (cx, tuple(qp)) for qp in backend.configuration().coupling_map
             if all(q < num_qubits for q in qp)
         ]
     )
 
-    # num_qubits = ibmqx4.configuration().num_qubits
-
-    # native_instructions = (
-    #     [(sx, (q,)) for q in range(num_qubits)] +
-    #     [(rz, (q,)) for q in range(num_qubits)] +
-    #     [(cx, tuple(qp)) for qp in ibmqx4.configuration().coupling_map]
-    # )
-
-    print(native_instructions)
-
-    sa = SimulatedAnnealing(u, native_instructions, continuous_optimization, 50)
+    sa = SimulatedAnnealing(u, native_instructions, continuous_optimization, max_iterations)
 
     v, params, cost = sa.run()
     print(v.draw())
@@ -180,35 +170,53 @@ if __name__ == '__main__':
     parser.add_argument('-n', '--noiseless', action='store_true', help='run noiseless simulations')
 
     subparsers = parser.add_subparsers(dest='experiment_class', help='class of experiments to run')
+
+    # Small-scale implementations
+    backends = {
+        'ibmqx4': FakeTenerife(),
+        'ibmqx5': FakeRueschlikon(),
+    }
+
     parser_small = subparsers.add_parser('small', help='small-scale implementations (variable structure)')
     parser_small.add_argument(
         'experiment',
         choices=small_circuits.keys(),
-        help='experiment to run'
+        help='experiment to run',
     )
+    parser_small.add_argument(
+        '-b', '--backend',
+        metavar='B',
+        choices=backends.keys(),
+        help='Backend to simulate (ibmqx4 - 5 qubits; ibmqx5 - 16 qubits) [default: ibmqx4]',
+        default='ibmqx4',
+    )
+    parser_small.add_argument('-i', '--iterations', metavar='I', type=int, default=50,
+        help='maximum number of gradient-free optimization iterations [default: 50]')
 
+    # Large-scale implementations
     ansatz_functions = {
         'sa1': scaling_ansatz_1,
-        'sa2': scaling_ansatz_2
+        'sa2': scaling_ansatz_2,
     }
 
     parser_large = subparsers.add_parser('large', help='large-scale implementations (fixed structure)')
     parser_large.add_argument('ansatz_type', choices=ansatz_functions.keys(),
-        help='ansatz type: sa1 = scaling ansatz #1 (single qubit rotations), ' \
-            'sa2 = scaling ansatz #2 (entanglement)')
+        help='ansatz type: sa1 - scaling ansatz #1 (single qubit rotations), ' \
+            'sa2 - scaling ansatz #2 (entanglement)')
     parser_large.add_argument('num_qubits', type=int, help='qubit count')
     parser_large.add_argument('-l', '--layers', metavar='L', type=int, default=2,
         help='number of layers (alternating pair ansatz)')
     parser_large.add_argument('-q', metavar='Q', type=float, default=1.0,
         help='weight factor for the mixed HST / LHST cost function (0.0 = LHST, 1.0 = HST) [default: 1.0]')
-    parser_large.add_argument('-i', '--iterations', metavar='I', type=int, default=100,
+    parser_large.add_argument('-i', '--iterations', metavar='I', type=int, default=50,
         help='maximum number of gradient descent iterations [default: 100]')
 
     args = parser.parse_args()
 
     if args.experiment_class == 'small':
         print(f'[bold][blue]Running small-scale experiment [green]{args.experiment}[/green]...[/blue][/bold]\n')
-        run_small_scale_implementation(small_circuits[args.experiment])
+        run_small_scale_implementation(small_circuits[args.experiment], backends[args.backend],
+            args.iterations)
     else:
         print(f'[bold][blue]Running small-scale experiment [green]{args.ansatz_type}[/green] ' \
             f'with [green]{args.num_qubits}[/green] qubits...[/blue][/bold]\n')
