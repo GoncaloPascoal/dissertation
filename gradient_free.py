@@ -8,7 +8,7 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.providers.backend import Backend
 import skopt
 
-from hst import hst, cost_hst
+from hst import HilbertSchmidt, cost_hst
 from utils import ContinuousOptimizationResult
 
 def gradient_free_hst(
@@ -17,7 +17,7 @@ def gradient_free_hst(
     tolerance: float = 0.01,
     max_starting_points: int = 10,
     max_iterations: int = 50,
-    sample_precision: float = 1.25e-4,
+    sample_precision: float = 1.0e-5,
     backend: Optional[Backend] = None,
 ) -> ContinuousOptimizationResult:
     """Performs gradient-free optimization for QAQC using the HST."""
@@ -32,15 +32,15 @@ def gradient_free_hst(
         sim = AerSimulator.from_backend(backend)
     sim.set_option('shots', int(1 / sample_precision))
 
-    qc = transpile(hst(u, v.inverse()), sim)
-    dimensions = [(-pi, pi) for _ in range(qc.num_parameters)]
+    qc = transpile(HilbertSchmidt(u, v), sim)
+    dimensions = [(-pi, pi)] * qc.num_parameters
 
     def cost_function(params: List[float]) -> float:
         qc_bound = qc.bind_parameters(params)
         counts = sim.run(qc_bound).result().get_counts()
         return cost_hst(counts)
 
-    best_params = [0.0 for _ in range(qc.num_parameters)]
+    best_params = [0.0] * qc.num_parameters
     best_cost = 1.0
 
     i = 0

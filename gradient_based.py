@@ -11,7 +11,7 @@ from qiskit_aer.noise import NoiseModel
 from qiskit import QuantumCircuit, transpile
 from qiskit.providers.backend import Backend
 
-from hst import hst, lhst, cost_hst_weighted
+from hst import HilbertSchmidt, LocalHilbertSchmidt, cost_hst_weighted
 from utils import ContinuousOptimizationResult
 
 def _create_cost_function(
@@ -21,25 +21,27 @@ def _create_cost_function(
     sample_precision: float,
     backend: Optional[Backend] = None,
 ) -> Callable[[np.ndarray], float]:
-    v_adj = v.inverse()
-
     if backend is None:
         sim = AerSimulator()
     else:
         sim = AerSimulator.from_backend(backend)
     sim.set_option('shots', int(1 / sample_precision))
 
-    qc_hst = transpile(hst(u, v_adj), sim)
-    qc_lhst = transpile([lhst(u, v_adj, i) for i in range(u.num_qubits)], sim)
+    qc_hst = transpile(HilbertSchmidt(u, v), sim)
+    qc_lhst = transpile([LocalHilbertSchmidt(u, v, i) for i in range(u.num_qubits)], sim)
 
     def cost_function(params: np.ndarray) -> float:
-        qc_hst_bound = qc_hst.bind_parameters(params)
-        counts = sim.run(qc_hst_bound).result().get_counts()
+        counts = {}
+        if q != 0.0:
+            qc_hst_bound = qc_hst.bind_parameters(params)
+            counts = sim.run(qc_hst_bound).result().get_counts()
 
-        qc_lhst_bound = [c.bind_parameters(params) for c in qc_lhst]
-        counts_list = sim.run(qc_lhst_bound).result().get_counts()
-        if isinstance(counts_list, dict):
-            counts_list = [counts_list]
+        counts_list = []
+        if q != 1.0:
+            qc_lhst_bound = [c.bind_parameters(params) for c in qc_lhst]
+            counts_list = sim.run(qc_lhst_bound).result().get_counts()
+            if isinstance(counts_list, dict):
+                counts_list = [counts_list]
 
         return cost_hst_weighted(counts, counts_list, q)
 
@@ -163,7 +165,7 @@ def gradient_based_hst_weighted(
     u: QuantumCircuit,
     v: QuantumCircuit,
     q: float = 1.0,
-    tolerance: float = 0.01,
+    tolerance: float = 1.0e-3,
     max_iterations: int = 50,
     sample_precision: float = 1.0e-3,
     noise_model: Optional[NoiseModel] = None,

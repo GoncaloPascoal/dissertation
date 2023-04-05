@@ -1,63 +1,49 @@
 
-from typing import Dict, List, Tuple
+from abc import ABC
+from typing import Dict, List, Optional, Tuple
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
 from qiskit.result import marginal_counts
 
 from utils import counts_to_ratios
 
-def _hst_base(n: int) -> Tuple[QuantumCircuit, QuantumRegister, QuantumRegister, ClassicalRegister]:
-    sys_a = QuantumRegister(n, 'SysA')
-    sys_b = QuantumRegister(n, 'SysB')
-    classical = ClassicalRegister(2 * n, 'C')
+class HilbertSchmidt(QuantumCircuit):
+    def __init__(self, u: QuantumCircuit, v: QuantumCircuit, measure_qubit: Optional[int] = None, name: str = 'HST'):
+        if u.num_qubits != v.num_qubits:
+            raise ValueError('Unitaries U and V do not have the same number of qubits.')
 
-    return QuantumCircuit(sys_a, sys_b, classical), sys_a, sys_b, classical
+        n = u.num_qubits
 
-def _hst_entangle(qc: QuantumCircuit):
-    n = qc.num_qubits // 2
+        sys_a = QuantumRegister(n, 'A')
+        sys_b = QuantumRegister(n, 'B')
+        classical = ClassicalRegister(2 * n, 'C')
 
-    qc.h(range(n))
-    for i in range(n):
-        qc.cx(i, i + n)
+        qc = QuantumCircuit(sys_a, sys_b, classical)
 
-def lhst(u: QuantumCircuit, v_adj: QuantumCircuit, i: int) -> QuantumCircuit:
-    assert u.num_qubits == v_adj.num_qubits
+        qc.h(range(n))
+        for i in range(n):
+            qc.cx(i, i + n)
 
-    n = u.num_qubits
-    assert i < n
-    qc, sys_a, sys_b, classical = _hst_base(n)
+        qc.compose(u.to_gate(label='U'), sys_a, inplace=True)
+        qc.compose(v.inverse().to_gate(label='V*'), sys_b, inplace=True)
 
-    _hst_entangle(qc)
+        qubits = range(n) if measure_qubit is None else [measure_qubit]
+        for i in qubits:
+            qc.cx(i, i + n)
+            qc.h(i)
 
-    qc.compose(u.to_gate(label='U'), sys_a, inplace=True)
-    qc.compose(v_adj.to_gate(label='V*'), sys_b, inplace=True)
+        qc.barrier()
+        if measure_qubit is None:
+            qc.measure_all(add_bits=False)
+        else:
+            pair = [measure_qubit, measure_qubit + n]
+            qc.measure(pair, pair)
 
-    qc.cx(i, i + n)
-    qc.h(i)
+        super().__init__(sys_a, sys_b, classical, name=name)
+        self.compose(qc, qubits=self.qubits, inplace=True)
 
-    qc.barrier()
-    pair = [i, i + n]
-    qc.measure(pair, pair)
-
-    return qc
-
-def hst(u: QuantumCircuit, v_adj: QuantumCircuit) -> QuantumCircuit:
-    assert u.num_qubits == v_adj.num_qubits
-
-    n = u.num_qubits
-    qc, sys_a, sys_b, classical = _hst_base(n)
-
-    _hst_entangle(qc)
-
-    qc.compose(u.to_gate(label='U'), sys_a, inplace=True)
-    qc.compose(v_adj.to_gate(label='V*'), sys_b, inplace=True)
-
-    for i in range(n):
-        qc.cx(i, i + n)
-    qc.h(sys_a)
-
-    qc.measure_all(add_bits=False)
-
-    return qc
+class LocalHilbertSchmidt(HilbertSchmidt):
+    def __init__(self, u: QuantumCircuit, v: QuantumCircuit, measure_qubit: int, name: str = 'LHST'):
+        super().__init__(u, v, measure_qubit, name)
 
 
 def _let_base(n: int) -> Tuple[QuantumCircuit, QuantumRegister, ClassicalRegister]:
@@ -144,8 +130,18 @@ def cost_llet(counts_list: List[Dict[str, int]]) -> float:
     return 1 - fidelity_llet(counts_list)
 
 def cost_hst_weighted(counts: Dict[str, int], counts_list: List[Dict[str, int]], q: float) -> float:
-    return q * cost_hst(counts) + (1 - q) * cost_lhst(counts_list)
+    if q == 0.0:
+        return cost_lhst(counts_list)
+    elif q == 1.0:
+        return cost_hst(counts)
+    else:
+        return q * cost_hst(counts) + (1 - q) * cost_lhst(counts_list)
 
 def cost_let_weighted(counts: Dict[str, int], counts_list: List[Dict[str, int]], q: float) -> float:
-    return q * cost_let(counts) + (1 - q) * cost_llet(counts_list)
+    if q == 0.0:
+        return cost_llet(counts_list)
+    elif q == 1.0:
+        return cost_let(counts)
+    else:
+        return q * cost_let(counts) + (1 - q) * cost_llet(counts_list)
 
