@@ -1,10 +1,10 @@
 
-from abc import ABC
 from typing import Dict, List, Optional, Tuple
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
 from qiskit.result import marginal_counts
 
 from utils import counts_to_ratios
+
 
 class HilbertSchmidt(QuantumCircuit):
     def __init__(self, u: QuantumCircuit, v: QuantumCircuit, measure_qubit: Optional[int] = None, name: str = 'HST'):
@@ -46,37 +46,32 @@ class LocalHilbertSchmidt(HilbertSchmidt):
         super().__init__(u, v, measure_qubit, name)
 
 
-def _let_base(n: int) -> Tuple[QuantumCircuit, QuantumRegister, ClassicalRegister]:
-    quantum = QuantumRegister(n, name='Q')
-    classical = ClassicalRegister(n, name='C')
+class LoschmidtEcho(QuantumCircuit):
+    def __init__(self, u: QuantumCircuit, v: QuantumCircuit, measure_qubit: Optional[int] = None, name: str = 'LET'):
+        if u.num_qubits != v.num_qubits:
+            raise ValueError('Unitaries U and V do not have the same number of qubits.')
 
-    return QuantumCircuit(quantum, classical), quantum, classical
+        n = u.num_qubits
 
-def let(u: QuantumCircuit, v_adj: QuantumCircuit) -> QuantumCircuit:
-    assert u.num_qubits == v_adj.num_qubits
+        quantum = QuantumRegister(n, name='Q')
+        classical = ClassicalRegister(n, name='C')
 
-    n = u.num_qubits
-    qc, quantum, classical = _let_base(n)
+        qc = QuantumCircuit(quantum, classical)
 
-    qc.compose(u.to_gate(label='U'), quantum, inplace=True)
-    qc.compose(v_adj.to_gate(label='V*'), quantum, inplace=True)
+        qc.compose(u.to_gate(label='U'), quantum, inplace=True)
+        qc.compose(v.inverse().to_gate(label='V*'), quantum, inplace=True)
 
-    qc.measure_all(add_bits=False)
+        if measure_qubit is None:
+            qc.measure_all(add_bits=False)
+        else:
+            qc.measure(measure_qubit, measure_qubit)
 
-    return qc
+        super().__init__(quantum, classical, name=name)
+        self.compose(qc, qubits=self.qubits, inplace=True)
 
-def llet(u: QuantumCircuit, v_adj: QuantumCircuit, i: int) -> QuantumCircuit:
-    assert u.num_qubits == v_adj.num_qubits
-
-    n = u.num_qubits
-    qc, quantum, classical = _let_base(n)
-
-    qc.compose(u.to_gate(label='U'), quantum, inplace=True)
-    qc.compose(v_adj.to_gate(label='V*'), quantum, inplace=True)
-
-    qc.measure(i, i)
-
-    return qc
+class LocalLoschmidtEcho(LoschmidtEcho):
+    def __init__(self, u: QuantumCircuit, v: QuantumCircuit, measure_qubit: int, name: str = 'LLET'):
+        super().__init__(u, v, measure_qubit, name)
 
 
 def fidelity_global(counts: Dict[str, int]) -> float:
