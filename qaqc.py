@@ -5,7 +5,7 @@ from typing import Callable, Tuple
 
 import numpy as np
 
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit, QiskitError, transpile
 from qiskit.circuit import Parameter
 from qiskit.circuit.library import CXGate, QFT, RZGate, SXGate
 from qiskit.providers import Backend
@@ -17,11 +17,18 @@ from gradient_based import gradient_based_hst_weighted
 from gradient_free import gradient_free_hst
 from simulated_annealing import SimulatedAnnealing
 
+
 def run_small_scale_implementation(u: QuantumCircuit, backend: Backend, max_iterations: int):
     continuous_optimization = lambda u, v: gradient_based_hst_weighted(u, v)
 
     print('[bold]Circuit to Compile (U)[/bold]')
     print(u.draw())
+
+    try:
+        max_instructions = len(transpile(u, basis_gates=['cx', 'rz', 'sx']))
+    except QiskitError:
+        # Qiskit transpiler cannot compile identity into native gate set
+        max_instructions = 1
 
     cx = CXGate()
     rz = RZGate(Parameter('x'))
@@ -38,10 +45,14 @@ def run_small_scale_implementation(u: QuantumCircuit, backend: Backend, max_iter
         ]
     )
 
-    sa = SimulatedAnnealing(u, native_instructions, continuous_optimization, max_iterations)
-
+    sa = SimulatedAnnealing(u, native_instructions, continuous_optimization, max_iterations, max_instructions)
     v, params, cost = sa.run()
+
+    print('[bold]Compilation Result (V)[/bold]')
     print(v.draw())
+
+    params_pi = [f'{p / pi:4f}π' for p in params]
+    print(f'The optimal parameters were {params_pi}, with a cost of {cost:.4f}')
 
 
 def dressed_cnot(param_num: int) -> Tuple[QuantumCircuit, int]:
@@ -73,7 +84,7 @@ def alternating_pair_ansatz(num_qubits: int, num_layers: int) -> QuantumCircuit:
     param_num = 0
     for l in range(2 * num_layers):
         start = 0 if num_qubits == 2 else l % 2
-        
+
         for control in range(start, num_qubits - 1, 2):
             d_cx, param_num = dressed_cnot(param_num)
             qc.compose(d_cx.to_gate(label='D.CX'), [control, control + 1], inplace=True)
@@ -123,7 +134,6 @@ def run_large_scale_implementation(
     num_qubits: int,
     q: float,
     max_iterations: int,
-    num_layers: int,
 ):
     u = create_ansatz(num_qubits)
     v = create_ansatz(num_qubits)
@@ -136,6 +146,7 @@ def run_large_scale_implementation(
     params, cost = gradient_based_hst_weighted(u, v, q=q, max_iterations=max_iterations)
     params_fmt = [f'{p:.5f}' for p in params]
     print(f'The best parameters were {params_fmt} with a cost of {cost:5f}.')
+
 
 if __name__ == '__main__':
     qc_i = QuantumCircuit(1)
@@ -202,10 +213,8 @@ if __name__ == '__main__':
     parser_large = subparsers.add_parser('large', help='large-scale implementations (fixed structure)')
     parser_large.add_argument('ansatz_type', choices=ansatz_functions.keys(),
         help='ansatz type: sa1 - scaling ansatz #1 (single qubit rotations), ' \
-            'sa2 - scaling ansatz #2 (entanglement)')
+             'sa2 - scaling ansatz #2 (entanglement)')
     parser_large.add_argument('num_qubits', type=int, help='qubit count')
-    parser_large.add_argument('-l', '--layers', metavar='L', type=int, default=2,
-        help='number of layers (alternating pair ansatz)')
     parser_large.add_argument('-q', metavar='Q', type=float, default=1.0,
         help='weight factor for the mixed HST / LHST cost function (0.0 = LHST, 1.0 = HST) [default: 1.0]')
     parser_large.add_argument('-i', '--iterations', metavar='I', type=int, default=50,
@@ -221,4 +230,4 @@ if __name__ == '__main__':
         print(f'[bold][blue]Running small-scale experiment [green]{args.ansatz_type}[/green] ' \
             f'with [green]{args.num_qubits}[/green] qubits...[/blue][/bold]\n')
         run_large_scale_implementation(ansatz_functions[args.ansatz_type], args.num_qubits, args.q,
-            args.iterations, args.layers)
+            args.iterations)
