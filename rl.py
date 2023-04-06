@@ -1,10 +1,11 @@
 
-from typing import Any, Dict, List, Sequence, Tuple
+import itertools
+import collections
+from typing import Any, Dict, List, Sequence, Tuple, Type
 
 import gymnasium as gym
 from gymnasium import spaces
 
-from ray.rllib.algorithms import Algorithm
 from ray.rllib.algorithms.apex_dqn import ApexDQN
 from ray.rllib.algorithms.dqn import DQN, DQNConfig
 from ray.rllib.utils.schedules import PiecewiseSchedule
@@ -16,13 +17,18 @@ from gradient_based import gradient_based_hst_weighted
 
 from rich import print
 
-CircuitAction = Tuple[Instruction, Tuple[int, ...]]
+
+# Use collections.namedtuple instead of typing.NamedTuple to avoid exception cased by cloudpickle (Ray)
+CircuitAction: Type[Tuple[Instruction, Tuple[int, ...]]] = collections.namedtuple(
+    'CircuitAction',
+    ['instruction', 'qubits']
+)
 
 class CircuitEnv(gym.Env):
     @staticmethod
     def _is_valid_action(action: CircuitAction) -> bool:
-        return (action[0].name not in {'delay', 'id', 'reset'} and
-            action[0].num_clbits == 0)
+        return (action.instruction.name not in {'delay', 'id', 'reset'} and
+                action.instruction.num_clbits == 0)
 
     def __init__(self, context: Dict[str, Any]):
         self.u = context['u']
@@ -33,9 +39,24 @@ class CircuitEnv(gym.Env):
         ]
         num_circuit_actions = len(self.circuit_actions)
 
+        def grouper(action: CircuitAction):
+            return action.instruction.name
+        groups = itertools.groupby(sorted(context['actions'], key=grouper), key=grouper)
+
+        qubit_set = set()
+        action_observation_map = {}
+
+        for i, (key, group) in enumerate(groups):
+            qubit_set.update(action.qubits for action in group)
+            action_observation_map[key] = i
+
+        self.action_observation_map = action_observation_map
+        self.qubit_observation_map = {qubits: i for i, qubits in enumerate(qubit_set)}
+
         self.action_space = spaces.Discrete(num_circuit_actions + 1)
         self.observation_space = spaces.Tuple((
-            spaces.Discrete(num_circuit_actions + 1),
+            spaces.Discrete(len(self.action_observation_map) + 1),
+            spaces.Discrete(len(self.qubit_observation_map) + 1),
             spaces.Discrete(self.max_depth + 1)
         ))
         self.reward_range = (-self.cx_penalty_weight, 1.0)
@@ -59,7 +80,11 @@ class CircuitEnv(gym.Env):
                 instruction.params = new_params
 
             self.v.append(instruction, qubits)
-            self.current_observation = (action, self.depth)
+            self.current_observation = (
+                self.action_observation_map[instruction.name],
+                self.qubit_observation_map[qubits],
+                self.depth
+            )
 
         reward = 0.0
         terminated = self.depth == self.max_depth or circuit_finished
@@ -75,7 +100,7 @@ class CircuitEnv(gym.Env):
 
         self.v = QuantumCircuit(self.u.num_qubits)
         self.num_params = 0
-        self.current_observation = (0, self.depth)
+        self.current_observation = (len(self.action_observation_map), len(self.qubit_observation_map), self.depth)
 
         return self.current_observation, {}
 
@@ -124,7 +149,7 @@ def double_dqn(
             recreate_failed_workers=True,
             restart_failed_sub_environments=True,
         )
-        .resources(num_gpus=1)
+        .resources(num_gpus=0)
         .framework('torch')
         .debugging(log_level='INFO')
         .environment(
@@ -159,15 +184,15 @@ if __name__ == '__main__':
     cx = CXGate()
 
     actions = [
-        (sx, (0,)),
-        (sx, (1,)),
-        (rz, (0,)),
-        (rz, (1,)),
-        (cx, (0, 1)),
-        (cx, (1, 0)),
+        CircuitAction(sx, (0,)),
+        CircuitAction(sx, (1,)),
+        CircuitAction(rz, (0,)),
+        CircuitAction(rz, (1,)),
+        CircuitAction(cx, (0, 1)),
+        CircuitAction(cx, (1, 0)),
     ]
 
-    model = double_dqn(
+    algo = double_dqn(
         u,
         actions,
         3,
@@ -175,4 +200,4 @@ if __name__ == '__main__':
     )
 
     for _ in range(10):
-        model.train()
+        algo.train()

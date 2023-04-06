@@ -1,13 +1,15 @@
 
+import collections
 from math import pi
-from typing import Callable, Dict, List, NamedTuple, Sequence
+from typing import Callable, Dict, List, Sequence, Tuple, Type
 
 from qiskit import QuantumCircuit
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 
-class ContinuousOptimizationResult(NamedTuple):
-    parameters: List[float]
-    cost: float
+# Use collections.namedtuple instead of typing.NamedTuple to avoid exception cased by cloudpickle (Ray)
+ContinuousOptimizationResult: Type[Tuple[List[float], float]] = collections.namedtuple(
+    'ContinuousOptimizationResult', ['parameters', 'cost']
+)
 
 ContinuousOptimizationFunction = Callable[
     [QuantumCircuit, QuantumCircuit],
