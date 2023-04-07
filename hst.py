@@ -1,5 +1,5 @@
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
 from qiskit.result import marginal_counts
 

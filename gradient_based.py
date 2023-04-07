@@ -1,6 +1,6 @@
 
 from math import pi
-from typing import Callable, Optional, Tuple, List
+from typing import Callable, Optional, Tuple
 
 import matplotlib.pyplot as plt
 
@@ -177,7 +177,7 @@ def gradient_based_hst_weighted(
 
     cost_function = _create_cost_function(u, v, q, sample_precision, noise_model)
 
-    params = np.array([0.0 for _ in range(v.num_parameters)])
+    params = np.zeros(v.num_parameters)
     cost = cost_function(params)
 
     i = 0
@@ -209,6 +209,7 @@ def gradient_based_hst_weighted(
         i += 1
 
     return ContinuousOptimizationResult(params.tolist(), cost)
+
 
 if __name__ == '__main__':
     from qiskit.circuit import Parameter
