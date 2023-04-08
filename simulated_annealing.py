@@ -20,8 +20,8 @@ from utils import ContinuousOptimizationFunction, ContinuousOptimizationResult
 
 from rich import print
 
-from rl import CircuitAction
 from gradient_based import gradient_based_hst_weighted
+from utils import NativeInstruction
 
 
 class NeighborhoodType(Enum):
@@ -37,19 +37,20 @@ class SimulatedAnnealing:
     _logger.setLevel(logging.INFO)
     _logger.addHandler(RichHandler())
 
-    # TODO: Replace CircuitAction in signature
     def __init__(
         self,
         u: QuantumCircuit,
-        native_instructions: Sequence[CircuitAction],
+        native_instructions: Sequence[NativeInstruction],
         continuous_optimization: ContinuousOptimizationFunction,
         max_iterations: int,
         max_instructions: int,
+        min_instructions: int = 0,
         tolerance: float = 1e-2,
         initial_temperature: float = 0.2,
         beta: float = 1.5,
     ):
         assert max_iterations > 0
+        assert max_instructions >= min_instructions >= 0
         assert tolerance > 0.0
         assert initial_temperature > 0.0
         assert beta > 0.0
@@ -66,6 +67,7 @@ class SimulatedAnnealing:
         self.continuous_optimization = lambda v: continuous_optimization(self.u, v)
         self.max_iterations = max_iterations
         self.max_instructions = max_instructions
+        self.min_instructions = min_instructions
         self.tolerance = tolerance
         self.initial_temperature = initial_temperature
         self.beta = beta
@@ -78,7 +80,7 @@ class SimulatedAnnealing:
 
         self._logger.info(f'Initial circuit has cost {self.best_cost:.4f}')
 
-    def _is_valid_instruction(self, instruction: CircuitAction) -> bool:
+    def _is_valid_instruction(self, instruction: NativeInstruction) -> bool:
         return (instruction[0].name not in {'delay', 'id', 'reset'} and
                 instruction[0].num_clbits == 0 and
                 instruction[0].num_qubits <= self.u.num_qubits)
@@ -183,6 +185,9 @@ class SimulatedAnnealing:
 
         if num_instructions == self.max_instructions:
             types.discard(NeighborhoodType.ADD_INSTRUCTION)
+
+        if num_instructions == self.min_instructions:
+            types.discard(NeighborhoodType.REMOVE_INSTRUCTION)
 
         if num_instructions == 0:
             types.discard(NeighborhoodType.CHANGE_INSTRUCTION)
@@ -311,7 +316,7 @@ def main():
     circuit, params, cost = algo.run()
     print(circuit.draw())
 
-    params_pi = [f'{p / pi:4f}π' for p in params]
+    params_pi = [f'{p / pi:.4f}π' for p in params]
     print(f'The best parameters were {params_pi} with a cost of {cost}.')
 
 

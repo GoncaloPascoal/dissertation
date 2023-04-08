@@ -6,16 +6,14 @@ from typing import List, Sequence, Tuple
 from qiskit import QuantumCircuit
 import rustworkx as rx
 
-from rl import CircuitAction
-from utils import ContinuousOptimizationFunction
+from utils import ContinuousOptimizationFunction, NativeInstruction
 
-from rich import print
 
 class AntColonyOptimization:
     def __init__(
         self,
         u: QuantumCircuit,
-        native_instructions: Sequence[CircuitAction],
+        native_instructions: Sequence[NativeInstruction],
         continuous_optimization: ContinuousOptimizationFunction,
         max_depth: int,
         num_ants: int,
@@ -49,7 +47,7 @@ class AntColonyOptimization:
             self.pheromone_graph.add_edges_from([(node, self.end_node, 1.0) for node in layer])
             previous_layer = layer
 
-        self.best_v = 0
+        self.best_v = QuantumCircuit(u.num_qubits)
         self.best_params: List[float] = []
         self.best_cost = 1.0
 
@@ -113,6 +111,7 @@ class AntColonyOptimization:
         edge_pheromones = self.pheromone_graph.get_edge_data(i, j)
         sum_pheromones = sum(edge[2] for edge in self.pheromone_graph.out_edges(i))
         return edge_pheromones / sum_pheromones
+
 
 if __name__ == '__main__':
     from qiskit.circuit import Parameter

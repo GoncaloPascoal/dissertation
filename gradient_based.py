@@ -14,6 +14,7 @@ from qiskit.providers.backend import Backend
 from hst import HilbertSchmidt, LocalHilbertSchmidt, cost_hst_weighted
 from utils import ContinuousOptimizationResult
 
+
 def _create_cost_function(
     u: QuantumCircuit,
     v: QuantumCircuit,
@@ -89,7 +90,7 @@ def visualize_gradient(
     assert v.num_parameters >= 2
 
     if base_params is None:
-        base_params = np.zeros((v.num_parameters,))
+        base_params = np.zeros(v.num_parameters)
 
     assert len(base_params) == v.num_parameters
 
@@ -134,7 +135,7 @@ def visualize_cost_function(
     assert v.num_parameters >= 2
 
     if base_params is None:
-        params = np.zeros((v.num_parameters,))
+        params = np.zeros(v.num_parameters)
     else:
         params = base_params.copy()
 
@@ -180,33 +181,34 @@ def gradient_based_hst_weighted(
     params = np.zeros(v.num_parameters)
     cost = cost_function(params)
 
-    i = 0
-    grad_count = 0
-    learning_rate = 1.0
+    if v.num_parameters != 0:
+        i = 0
+        grad_count = 0
+        learning_rate = 1.0
 
-    while i < max_iterations and grad_count < 4:
-        gradient = compute_gradient(cost_function, params)
+        while i < max_iterations and grad_count < 4:
+            gradient = compute_gradient(cost_function, params)
 
-        gradient_norm = np.linalg.norm(gradient) ** 2
-        if gradient_norm <= tolerance:
-            grad_count += 1
+            gradient_norm = np.linalg.norm(gradient) ** 2
+            if gradient_norm <= tolerance:
+                grad_count += 1
 
-        params_1 = params - learning_rate * gradient
-        params_2 = params_1 - learning_rate * gradient
+            params_1 = params - learning_rate * gradient
+            params_2 = params_1 - learning_rate * gradient
 
-        cost_2 = cost_function(params_2)
-        if cost - cost_2 >= learning_rate * gradient_norm:
-            learning_rate *= 2
-            params = params_2
-            cost = cost_2
-        else:
-            cost_1 = cost_function(params_1)
-            if cost - cost_1 < learning_rate / 2 * gradient_norm:
-                learning_rate /= 2
-            params = params_1
-            cost = cost_1
+            cost_2 = cost_function(params_2)
+            if cost - cost_2 >= learning_rate * gradient_norm:
+                learning_rate *= 2
+                params = params_2
+                cost = cost_2
+            else:
+                cost_1 = cost_function(params_1)
+                if cost - cost_1 < learning_rate / 2 * gradient_norm:
+                    learning_rate /= 2
+                params = params_1
+                cost = cost_1
 
-        i += 1
+            i += 1
 
     return ContinuousOptimizationResult(params.tolist(), cost)
 
@@ -215,16 +217,6 @@ if __name__ == '__main__':
     from qiskit.circuit import Parameter
     from rich import print
     from utils import normalize_angles
-
-    # u = QuantumCircuit(1)
-    # u.h(0)
-
-    # v = QuantumCircuit(1)
-    # v.rz(Parameter('a'), 0)
-    # v.sx(0)
-    # v.rz(Parameter('b'), 0)
-
-    # visualize_gradient(u, v)
 
     # Controlled Hadamard
     u = QuantumCircuit(2)

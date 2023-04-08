@@ -1,7 +1,6 @@
 
 import itertools
-import collections
-from typing import Any, Dict, List, Sequence, Tuple, Type
+from typing import Any, Dict, List, Sequence, Tuple
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -11,22 +10,15 @@ from ray.rllib.algorithms.dqn import DQN, DQNConfig
 from ray.rllib.utils.schedules import PiecewiseSchedule
 
 from qiskit import QuantumCircuit
-from qiskit.circuit import Instruction, Parameter
+from qiskit.circuit import Parameter
 
 from gradient_based import gradient_based_hst_weighted
+from utils import NativeInstruction
 
-from rich import print
-
-
-# Use collections.namedtuple instead of typing.NamedTuple to avoid exception cased by cloudpickle (Ray)
-CircuitAction: Type[Tuple[Instruction, Tuple[int, ...]]] = collections.namedtuple(
-    'CircuitAction',
-    ['instruction', 'qubits']
-)
 
 class CircuitEnv(gym.Env):
     @staticmethod
-    def _is_valid_action(action: CircuitAction) -> bool:
+    def _is_valid_action(action: NativeInstruction) -> bool:
         return (action.instruction.name not in {'delay', 'id', 'reset'} and
                 action.instruction.num_clbits == 0)
 
@@ -34,12 +26,12 @@ class CircuitEnv(gym.Env):
         self.u = context['u']
         self.max_depth = context['max_depth']
         self.cx_penalty_weight = context.get('cx_penalty_weight', 0.0)
-        self.circuit_actions: List[CircuitAction] = [
+        self.circuit_actions: List[NativeInstruction] = [
             a for a in context['actions'] if CircuitEnv._is_valid_action(a)
         ]
         num_circuit_actions = len(self.circuit_actions)
 
-        def grouper(action: CircuitAction):
+        def grouper(action: NativeInstruction):
             return action.instruction.name
         groups = itertools.groupby(sorted(context['actions'], key=grouper), key=grouper)
 
@@ -119,7 +111,7 @@ class CircuitEnv(gym.Env):
 
 def double_dqn(
     u: QuantumCircuit,
-    actions: Sequence[CircuitAction],
+    actions: Sequence[NativeInstruction],
     max_depth: int,
     epsilon_greedy_episodes: Sequence[Tuple[float, int]],
     learning_rate: float = 0.02,
@@ -184,12 +176,12 @@ if __name__ == '__main__':
     cx = CXGate()
 
     actions = [
-        CircuitAction(sx, (0,)),
-        CircuitAction(sx, (1,)),
-        CircuitAction(rz, (0,)),
-        CircuitAction(rz, (1,)),
-        CircuitAction(cx, (0, 1)),
-        CircuitAction(cx, (1, 0)),
+        NativeInstruction(sx, (0,)),
+        NativeInstruction(sx, (1,)),
+        NativeInstruction(rz, (0,)),
+        NativeInstruction(rz, (1,)),
+        NativeInstruction(cx, (0, 1)),
+        NativeInstruction(cx, (1, 0)),
     ]
 
     algo = double_dqn(
