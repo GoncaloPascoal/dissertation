@@ -2,6 +2,7 @@
 import logging
 import random
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Sequence, Tuple, List, Optional
 
 import numpy as np
@@ -13,7 +14,36 @@ from gradient_based import gradient_based_hst_weighted
 from rl import NativeInstruction
 from utils import create_native_instruction_dict, ContinuousOptimizationFunction
 
+
 Genome = List[Tuple[str, Tuple[int, ...]]]
+
+
+@dataclass(order=True)
+class Solution:
+    genome: Genome = field(compare=False)
+    fitness: float = field(default=0.0)
+
+
+class Selection(ABC):
+    @abstractmethod
+    def __call__(self, solutions: List[Solution]) -> List[Tuple[Solution, Solution]]:
+        raise NotImplementedError
+
+
+class TournamentSelection(Selection):
+    def __call__(self, solutions: List[Solution]) -> List[Tuple[Solution, Solution]]:
+        selected = []
+        population_size = len(solutions)
+
+        while len(selected) < population_size:
+            first_a, first_b, second_a, second_b = random.sample(solutions, 4)
+
+            first_parent = max(first_a, first_b)
+            second_parent = max(second_a, second_b)
+
+            selected.append((first_parent, second_parent))
+
+        return selected
 
 
 class Crossover(ABC):
@@ -97,6 +127,7 @@ class GeneticAlgorithm:
             max_instructions: int,
             tolerance: float,
             max_generations: int,
+            selection: Selection,
             crossover: Crossover,
             population_size: int,
             mutation_rate: float = 1e-2,
@@ -123,6 +154,7 @@ class GeneticAlgorithm:
         self.tolerance = tolerance
 
         self.max_generations = max_generations
+        self.selection = selection
         self.crossover = crossover
         self.population = [self._generate_solution() for _ in range(population_size)]
         self.generation = 1
@@ -135,21 +167,21 @@ class GeneticAlgorithm:
 
         random.seed(seed)
 
-    def _generate_solution(self) -> Genome:
-        solution = []
+    def _generate_solution(self) -> Solution:
+        genome = []
 
         for _ in range(self.max_instructions):
             name = random.choice(list(self.instruction_dict))
             qubits = random.choice(list(self.instruction_dict[name][1]))
-            solution.append((name, qubits))
+            genome.append((name, qubits))
 
-        return solution
+        return Solution(genome)
 
-    def _parse_solution(self, solution: Genome) -> QuantumCircuit:
+    def _parse_genome(self, genome: Genome) -> QuantumCircuit:
         v = QuantumCircuit(self.u.num_qubits)
         gen = ParameterGenerator()
 
-        for name, qubits in solution:
+        for name, qubits in genome:
             instruction = self.instruction_dict[name][0]
             if instruction.is_parameterized():
                 instruction = gen.parametrize(instruction)
@@ -157,8 +189,8 @@ class GeneticAlgorithm:
 
         return v
 
-    def _calculate_fitness(self, solution: Genome) -> float:
-        v = self._parse_solution(solution)
+    def _calculate_fitness(self, solution: Solution) -> float:
+        v = self._parse_genome(solution.genome)
         params, cost = self.continuous_optimization(v)
 
         if cost < self.best_cost:
@@ -191,43 +223,31 @@ class GeneticAlgorithm:
             solution[i] = name, qubits
 
     def run(self) -> Tuple[QuantumCircuit, Sequence[float], float]:
-        def get_fitness(s: Tuple[Genome, float]) -> float:
-            return s[1]
-
-        fitness_values = []
         for _ in range(self.max_generations):
-            if fitness_values:
-                # Reuse fitness values from elite solutions
-                fitness_values = fitness_values[:self.num_elites]
-            fitness_values += [
-                (solution, self._calculate_fitness(solution))
-                for solution in self.population[self.num_elites:]
-            ]
+            # Reuse fitness values from elite solutions
+            to_calculate = self.population[self.num_elites:] if self.generation != 1 else self.population
+            for solution in to_calculate:
+                solution.fitness = self._calculate_fitness(solution)
 
             if self.best_cost <= self.tolerance:
                 break
 
-            avg_fitness = np.mean([get_fitness(s) for s in fitness_values])
+            avg_fitness = np.mean([solution.fitness for solution in self.population])
             self._logger.info(f'Average fitness for generation {self.generation} was {avg_fitness:.4f}')
 
             new_population = []
             if self.num_elites > 0:
-                elites = sorted(fitness_values, key=get_fitness, reverse=True)[:self.num_elites]
-                new_population.extend(s[0] for s in elites)
+                elites = sorted(self.population, reverse=True)[:self.num_elites]
+                new_population.extend(elites)
 
-            for _ in range(len(self.population) // 2):
-                first_a, first_b, second_a, second_b = random.sample(fitness_values, 4)
+            for first_parent, second_parent in self.selection(self.population):
+                first_genome, second_genome = self.crossover(first_parent.genome, second_parent.genome)
 
-                first_parent, _ = max(first_a, first_b, key=get_fitness)
-                second_parent, _ = max(second_a, second_b, key=get_fitness)
+                self._mutation(first_genome)
+                self._mutation(second_genome)
 
-                first_child, second_child = self.crossover(first_parent, second_parent)
-
-                self._mutation(first_child)
-                self._mutation(second_child)
-
-                new_population.append(first_child)
-                new_population.append(second_child)
+                new_population.append(Solution(first_genome))
+                new_population.append(Solution(second_genome))
 
             self.population = new_population
             self.generation += 1
@@ -260,8 +280,8 @@ def main():
     def continuous_optimization(u: QuantumCircuit, v: QuantumCircuit):
         return gradient_based_hst_weighted(u, v)
 
-    algo = GeneticAlgorithm(u, actions, continuous_optimization, 3, 1e-2, 10, KPointCrossover(0.75, 1), 10,
-                            mutation_rate=3e-2)
+    algo = GeneticAlgorithm(u, actions, continuous_optimization, 3, 1e-2, 10, TournamentSelection(),
+                            KPointCrossover(0.75, 1), 10, mutation_rate=3e-2)
 
     v, params, cost = algo.run()
     print(v.draw())
