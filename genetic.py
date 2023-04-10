@@ -2,7 +2,7 @@
 import logging
 import random
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Sequence, Tuple, List, Optional
 
 import numpy as np
@@ -18,32 +18,105 @@ from utils import create_native_instruction_dict, ContinuousOptimizationFunction
 Genome = List[Tuple[str, Tuple[int, ...]]]
 
 
-@dataclass(order=True)
+@dataclass
 class Solution:
-    genome: Genome = field(compare=False)
-    fitness: float = field(default=0.0)
+    genome: Genome
+    fitness: float = 0.0
+
+    def sort_key(self) -> float:
+        """
+        Used as a key callable for sorting solutions. Fitness should take priority when sorting,
+        but it is an optional field therefore it must be defined after the required genome field.
+        """
+        return self.fitness
 
 
 class Selection(ABC):
+    def __init__(self, selection_ratio: float = 1.0):
+        if not (0 <= selection_ratio <= 1):
+            raise ValueError(f'Selection ratio must be between 0 and 1, got {selection_ratio}')
+
+        self.selection_ratio = selection_ratio
+
+    def num_selections(self, population: Sequence[Solution]):
+        # Divide population size by two since two parents are selected in each iteration
+        return round(self.selection_ratio * len(population) / 2)
+
     @abstractmethod
-    def __call__(self, solutions: List[Solution]) -> List[Tuple[Solution, Solution]]:
+    def __call__(self, population: List[Solution]) -> List[Tuple[Solution, Solution]]:
         raise NotImplementedError
 
 
 class TournamentSelection(Selection):
-    def __call__(self, solutions: List[Solution]) -> List[Tuple[Solution, Solution]]:
+    def __init__(self, selection_ratio: float = 1.0, tournament_size: int = 2, with_replacement: bool = True):
+        super().__init__(selection_ratio)
+
+        if tournament_size <= 0:
+            raise ValueError(f'Tournament size must be positive, got {tournament_size}')
+
+        self.tournament_size = tournament_size
+        self.with_replacement = with_replacement
+
+    def __call__(self, population: List[Solution]) -> List[Tuple[Solution, Solution]]:
+        pairs = []
+
+        if not self.with_replacement:
+            population = population.copy()
+
+        for _ in range(self.num_selections(population)):
+            it_population = population.copy()
+
+            first_parent = max(random.sample(it_population, self.tournament_size), key=Solution.sort_key)
+            it_population.remove(first_parent)
+            second_parent = max(random.sample(it_population, self.tournament_size), key=Solution.sort_key)
+
+            pairs.append((first_parent, second_parent))
+
+            if not self.with_replacement:
+                population.remove(first_parent)
+                population.remove(second_parent)
+
+        return pairs
+
+
+class RouletteWheelSelection(Selection):
+    def __init__(self, selection_ratio: float = 1.0, with_replacement: bool = True):
+        super().__init__(selection_ratio)
+
+        self.with_replacement = with_replacement
+
+    def __call__(self, population: List[Solution]) -> List[Tuple[Solution, Solution]]:
+        pairs = []
+
+        if not self.with_replacement:
+            population = population.copy()
+
+        for _ in range(self.num_selections(population)):
+            it_population = population.copy()
+
+            first_parent = random.choices(it_population, weights=[s.fitness for s in it_population])[0]
+            it_population.remove(first_parent)
+            second_parent = random.choices(it_population, weights=[s.fitness for s in it_population])[0]
+
+            pairs.append((first_parent, second_parent))
+
+            if not self.with_replacement:
+                population.remove(first_parent)
+                population.remove(second_parent)
+
+        return pairs
+
+
+class StochasticUniversalSampling(Selection):
+    def __call__(self, population: List[Solution]) -> List[Tuple[Solution, Solution]]:
         selected = []
-        population_size = len(solutions)
 
-        while len(selected) < population_size:
-            first_a, first_b, second_a, second_b = random.sample(solutions, 4)
+        # Sort population in descending order of fitness
+        population = sorted(population, key=Solution.sort_key, reverse=True)
 
-            first_parent = max(first_a, first_b)
-            second_parent = max(second_a, second_b)
-
-            selected.append((first_parent, second_parent))
-
-        return selected
+        random.shuffle(selected)
+        pairs = [(selected[i], selected[i + 1]) for i in range(0, len(selected), 2)]
+        return pairs
 
 
 class Crossover(ABC):
@@ -237,7 +310,7 @@ class GeneticAlgorithm:
 
             new_population = []
             if self.num_elites > 0:
-                elites = sorted(self.population, reverse=True)[:self.num_elites]
+                elites = sorted(self.population, key=Solution.sort_key, reverse=True)[:self.num_elites]
                 new_population.extend(elites)
 
             for first_parent, second_parent in self.selection(self.population):
@@ -262,7 +335,7 @@ def main():
     from qiskit.circuit import Parameter
 
     u = QuantumCircuit(2)
-    u.swap(0, 1)
+    u.ch(0, 1)
 
     sx = SXGate()
     rz = RZGate(Parameter('x'))
@@ -280,8 +353,9 @@ def main():
     def continuous_optimization(u: QuantumCircuit, v: QuantumCircuit):
         return gradient_based_hst_weighted(u, v)
 
-    algo = GeneticAlgorithm(u, actions, continuous_optimization, 3, 1e-2, 10, TournamentSelection(),
-                            KPointCrossover(0.75, 1), 10, mutation_rate=3e-2)
+    algo = GeneticAlgorithm(u, actions, continuous_optimization, 6, 1e-2, 15,
+                            TournamentSelection(tournament_size=2),
+                            KPointCrossover(1.0, 1), 20, mutation_rate=3e-2)
 
     v, params, cost = algo.run()
     print(v.draw())
