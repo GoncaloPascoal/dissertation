@@ -7,6 +7,7 @@ from typing import Sequence, Tuple, List, Optional
 
 import numpy as np
 from qiskit import QuantumCircuit
+from ray.rllib.utils.schedules import Schedule
 from rich.logging import RichHandler
 
 from auto_parameter import ParameterGenerator
@@ -29,6 +30,24 @@ class Solution:
         but it is an optional field therefore it must be defined after the required genome field.
         """
         return self.fitness
+
+    def similarity(self, other: 'Solution') -> float:
+        """
+        Rates the similarity between two solutions, based on their genomes.
+        A value of 0 indicates the genomes are completely different, while 1 is returned if they are identical.
+        """
+        if len(self.genome) != len(other.genome):
+            raise ValueError('Solutions have genomes with different lengths')
+
+        score = 0.0
+        gene_inc = 1.0 / len(self.genome)
+
+        # TODO: consider instruction name and qubits separately
+        for gene_a, gene_b in zip(self.genome, other.genome):
+            if gene_a == gene_b:
+                score += gene_inc
+
+        return score
 
 
 class Selection(ABC):
@@ -110,9 +129,24 @@ class RouletteWheelSelection(Selection):
 class StochasticUniversalSampling(Selection):
     def __call__(self, population: List[Solution]) -> List[Tuple[Solution, Solution]]:
         selected = []
+        num_selections = 2 * self.num_selections(population)
 
         # Sort population in descending order of fitness
         population = sorted(population, key=Solution.sort_key, reverse=True)
+        total_fitness = sum(s.fitness for s in population)
+        interval = total_fitness / num_selections
+
+        accumulator = 0.0
+        r = random.random() * interval
+        for solution in population:
+            accumulator += solution.fitness
+
+            if r <= accumulator:
+                selected.append(solution)
+                r += interval
+
+            if r > total_fitness:
+                break
 
         random.shuffle(selected)
         pairs = [(selected[i], selected[i + 1]) for i in range(0, len(selected), 2)]
@@ -120,7 +154,7 @@ class StochasticUniversalSampling(Selection):
 
 
 class Crossover(ABC):
-    def __init__(self, crossover_rate: float):
+    def __init__(self, crossover_rate: float = 1.0):
         if not (0 <= crossover_rate <= 1):
             raise ValueError(f'Crossover rate must be between 0 and 1, got {crossover_rate}')
 
@@ -137,11 +171,12 @@ class Crossover(ABC):
 
 
 class KPointCrossover(Crossover):
-    def __init__(self, crossover_rate: float, k: int):
+    def __init__(self, k: int, crossover_rate: float = 1.0):
+        super().__init__(crossover_rate)
+
         if k <= 0:
             raise ValueError(f'The value of k must be positive, got {k}')
 
-        super().__init__(crossover_rate)
         self.k = k
 
     def _crossover(self, parent_a: Genome, parent_b: Genome) -> Tuple[Genome, Genome]:
@@ -193,19 +228,18 @@ class GeneticAlgorithm:
     _logger.addHandler(RichHandler())
 
     def __init__(
-            self,
-            u: QuantumCircuit,
-            native_instructions: Sequence[NativeInstruction],
-            continuous_optimization: ContinuousOptimizationFunction,
-            max_instructions: int,
-            tolerance: float,
-            max_generations: int,
-            selection: Selection,
-            crossover: Crossover,
-            population_size: int,
-            mutation_rate: float = 1e-2,
-            num_elites: int = 0,
-            seed: Optional[int] = None,
+        self,
+        u: QuantumCircuit,
+        native_instructions: Sequence[NativeInstruction],
+        continuous_optimization: ContinuousOptimizationFunction,
+        max_instructions: int,
+        tolerance: float,
+        max_generations: int,
+        selection: Selection,
+        crossover: Crossover,
+        population_size: int,
+        mutation_rate: float = 1e-2,
+        seed: Optional[int] = None,
     ):
         if population_size < 4:
             raise ValueError(f'Population size must be at least 4, got {population_size}')
@@ -214,11 +248,6 @@ class GeneticAlgorithm:
 
         if max_instructions <= 0:
             raise ValueError(f'Maximum number of instructions must be positive, got {max_instructions}')
-
-        if num_elites < 0:
-            raise ValueError(f'Number of elite solutions must not be negative, got {num_elites}')
-        if num_elites % 2 != 0:
-            raise ValueError(f'Number of elite solutions must be even, got {num_elites}')
 
         self.u = u
         self.instruction_dict = create_native_instruction_dict(native_instructions)
@@ -232,7 +261,7 @@ class GeneticAlgorithm:
         self.population = [self._generate_solution() for _ in range(population_size)]
         self.generation = 1
         self.mutation_rate = mutation_rate
-        self.num_elites = num_elites
+        self.num_elites = population_size - 2 * self.selection.num_selections(self.population)
 
         self.best_v = QuantumCircuit(u.num_qubits)
         self.best_params = []
@@ -331,7 +360,7 @@ class GeneticAlgorithm:
 def main():
     from math import pi
 
-    from qiskit.circuit.library import SXGate, RZGate, CXGate
+    from qiskit.circuit.library import SXGate, RZGate, CXGate, QFT
     from qiskit.circuit import Parameter
 
     u = QuantumCircuit(2)
@@ -351,11 +380,11 @@ def main():
     ]
 
     def continuous_optimization(u: QuantumCircuit, v: QuantumCircuit):
-        return gradient_based_hst_weighted(u, v)
+        return gradient_based_hst_weighted(u, v, sample_precision=5e-4)
 
     algo = GeneticAlgorithm(u, actions, continuous_optimization, 6, 1e-2, 15,
-                            TournamentSelection(tournament_size=2),
-                            KPointCrossover(1.0, 1), 20, mutation_rate=3e-2)
+                            TournamentSelection(),
+                            KPointCrossover(1), 20, mutation_rate=3e-2)
 
     v, params, cost = algo.run()
     print(v.draw())
