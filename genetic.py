@@ -7,7 +7,6 @@ from typing import ClassVar, Sequence, Tuple, List, Optional
 
 import numpy as np
 from qiskit import QuantumCircuit
-from ray.rllib.utils.schedules import Schedule
 from rich.logging import RichHandler
 
 from auto_parameter import ParameterGenerator
@@ -19,7 +18,7 @@ from utils import create_native_instruction_dict, ContinuousOptimizationFunction
 Genome = List[Tuple[str, Tuple[int, ...]]]
 
 
-@dataclass
+@dataclass(slots=True)
 class Solution:
     genome: Genome
     fitness: float = 0.0
@@ -262,6 +261,7 @@ class GeneticAlgorithm:
         population_size: int,
         mutation_rate: float = 1e-2,
         seed: Optional[int] = None,
+        cache_fitness: bool = True,
     ):
         if population_size < 4:
             raise ValueError(f'Population size must be at least 4, got {population_size}')
@@ -291,6 +291,9 @@ class GeneticAlgorithm:
 
         random.seed(seed)
 
+        self.cache_fitness = cache_fitness
+        self.solution_cache = {}
+
     def _generate_solution(self) -> Solution:
         genome = []
 
@@ -314,6 +317,12 @@ class GeneticAlgorithm:
         return v
 
     def _calculate_fitness(self, solution: Solution) -> float:
+        if self.cache_fitness:
+            try:
+                return self.solution_cache[tuple(solution.genome)]
+            except KeyError:
+                pass
+
         v = self._parse_genome(solution.genome)
         params, cost = self.continuous_optimization(v)
 
@@ -321,7 +330,11 @@ class GeneticAlgorithm:
             self.best_v, self.best_params, self.best_cost = v.copy(), params, cost
             self._logger.info(f'Cost decreased to {cost:.4f} in generation {self.generation}')
 
-        return 1.0 - cost
+        fitness = 1.0 - cost
+        if self.cache_fitness:
+            self.solution_cache[tuple(solution.genome)] = fitness
+
+        return fitness
 
     def _mutate_name(self, name: str) -> str:
         return random.choice([n for n in self.instruction_dict.keys() if n != name])
@@ -358,6 +371,9 @@ class GeneticAlgorithm:
 
             avg_fitness = np.mean([solution.fitness for solution in self.population])
             self._logger.info(f'Average fitness for generation {self.generation} was {avg_fitness:.4f}')
+
+            if self.cache_fitness:
+                self._logger.info(f'Explored {len(self.solution_cache)} unique solutions')
 
             new_population = []
             if self.num_elites > 0:
