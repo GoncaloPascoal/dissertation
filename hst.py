@@ -1,5 +1,7 @@
 
-from typing import Dict, List, Optional
+from collections.abc import Collection
+from typing import Dict, Optional
+
 from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
 from qiskit.result import marginal_counts
 
@@ -80,7 +82,7 @@ def fidelity_global(counts: Dict[str, int]) -> float:
     l = len(next(iter(counts)))
     return counts_to_ratios(counts).get('0' * l, 0.0)
 
-def fidelity_lhst(counts_list: List[Dict[str, int]]) -> float:
+def fidelity_lhst(counts_list: Collection[Dict[str, int]]) -> float:
     assert counts_list
 
     total = 0.0
@@ -92,7 +94,7 @@ def fidelity_lhst(counts_list: List[Dict[str, int]]) -> float:
 
     return total / n
 
-def fidelity_llet(counts_list: List[Dict[str, int]]) -> float:
+def fidelity_llet(counts_list: Collection[Dict[str, int]]) -> float:
     assert counts_list
 
     total = 0.0
@@ -115,16 +117,16 @@ def cost_hst(counts: Dict[str, int]) -> float:
     """
     return 1 - fidelity_global(counts)
 
-def cost_lhst(counts_list: List[Dict[str, int]]) -> float:
+def cost_lhst(counts_list: Collection[Dict[str, int]]) -> float:
     return 1 - fidelity_lhst(counts_list)
 
 def cost_let(counts: Dict[str, int]) -> float:
     return 1 - fidelity_global(counts)
 
-def cost_llet(counts_list: List[Dict[str, int]]) -> float:
+def cost_llet(counts_list: Collection[Dict[str, int]]) -> float:
     return 1 - fidelity_llet(counts_list)
 
-def cost_hst_weighted(counts: Dict[str, int], counts_list: List[Dict[str, int]], q: float) -> float:
+def cost_hst_weighted(counts: Dict[str, int], counts_list: Collection[Dict[str, int]], q: float) -> float:
     if q == 0.0:
         return cost_lhst(counts_list)
     elif q == 1.0:
@@ -132,7 +134,7 @@ def cost_hst_weighted(counts: Dict[str, int], counts_list: List[Dict[str, int]],
     else:
         return q * cost_hst(counts) + (1 - q) * cost_lhst(counts_list)
 
-def cost_let_weighted(counts: Dict[str, int], counts_list: List[Dict[str, int]], q: float) -> float:
+def cost_let_weighted(counts: Dict[str, int], counts_list: Collection[Dict[str, int]], q: float) -> float:
     if q == 0.0:
         return cost_llet(counts_list)
     elif q == 1.0:

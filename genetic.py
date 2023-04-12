@@ -3,7 +3,7 @@ import logging
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Sequence, Tuple, List, Optional
+from typing import ClassVar, Sequence, Tuple, List, Optional
 
 import numpy as np
 from qiskit import QuantumCircuit
@@ -24,6 +24,10 @@ class Solution:
     genome: Genome
     fitness: float = 0.0
 
+    # Class variables
+    similarity_name_weight: ClassVar[float] = 0.75
+    similarity_qubits_weight: ClassVar[float] = 1.0 - similarity_name_weight
+
     def sort_key(self) -> float:
         """
         Used as a key callable for sorting solutions. Fitness should take priority when sorting,
@@ -42,10 +46,16 @@ class Solution:
         score = 0.0
         gene_inc = 1.0 / len(self.genome)
 
-        # TODO: consider instruction name and qubits separately
-        for gene_a, gene_b in zip(self.genome, other.genome):
-            if gene_a == gene_b:
-                score += gene_inc
+        for (name_a, qubits_a), (name_b, qubits_b) in zip(self.genome, other.genome):
+            if name_a == name_b:
+                score += Solution.similarity_name_weight * gene_inc
+
+            common_qubits = set(qubits_a) & set(qubits_b)
+            if common_qubits:
+                score += (
+                    Solution.similarity_qubits_weight * gene_inc *
+                    len(common_qubits) / max(len(qubits_a), len(qubits_b))
+                )
 
         return score
 
@@ -67,7 +77,13 @@ class Selection(ABC):
 
 
 class TournamentSelection(Selection):
-    def __init__(self, selection_ratio: float = 1.0, tournament_size: int = 2, with_replacement: bool = True):
+    def __init__(
+        self,
+        selection_ratio: float = 1.0,
+        tournament_size: int = 2,
+        with_replacement: bool = True,
+        similarity_penalty: Optional[float] = None,
+    ):
         super().__init__(selection_ratio)
 
         if tournament_size <= 0:
@@ -75,6 +91,7 @@ class TournamentSelection(Selection):
 
         self.tournament_size = tournament_size
         self.with_replacement = with_replacement
+        self.similarity_penalty = similarity_penalty
 
     def __call__(self, population: List[Solution]) -> List[Tuple[Solution, Solution]]:
         pairs = []
@@ -87,7 +104,12 @@ class TournamentSelection(Selection):
 
             first_parent = max(random.sample(it_population, self.tournament_size), key=Solution.sort_key)
             it_population.remove(first_parent)
-            second_parent = max(random.sample(it_population, self.tournament_size), key=Solution.sort_key)
+
+            key = Solution.sort_key
+            if self.similarity_penalty is not None:
+                def key(s: Solution): return s.sort_key() - self.similarity_penalty * s.similarity(first_parent)
+
+            second_parent = max(random.sample(it_population, self.tournament_size), key=key)
 
             pairs.append((first_parent, second_parent))
 
@@ -113,9 +135,9 @@ class RouletteWheelSelection(Selection):
         for _ in range(self.num_selections(population)):
             it_population = population.copy()
 
-            first_parent = random.choices(it_population, weights=[s.fitness for s in it_population])[0]
+            first_parent = random.choices(it_population, weights=[s.sort_key() for s in it_population])[0]
             it_population.remove(first_parent)
-            second_parent = random.choices(it_population, weights=[s.fitness for s in it_population])[0]
+            second_parent = random.choices(it_population, weights=[s.sort_key() for s in it_population])[0]
 
             pairs.append((first_parent, second_parent))
 
