@@ -5,12 +5,14 @@ from typing import Any, Dict, List, Sequence, Tuple
 import gymnasium as gym
 from gymnasium import spaces
 
-from ray.rllib.algorithms.apex_dqn import ApexDQN
-from ray.rllib.algorithms.dqn import DQN, DQNConfig
-from ray.rllib.utils.schedules import PiecewiseSchedule
-
 from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter
+
+from ray.rllib.algorithms import AlgorithmConfig, Algorithm
+from ray.rllib.algorithms.apex_dqn import ApexDQN
+from ray.rllib.algorithms.dqn import DQNConfig
+from ray.rllib.algorithms.sac import SACConfig
+from ray.rllib.utils.schedules import PiecewiseSchedule
 
 from gradient_based import gradient_based_hst_weighted
 from utils import NativeInstruction
@@ -55,6 +57,7 @@ class CircuitEnv(gym.Env):
 
         self.v = QuantumCircuit(self.u.num_qubits)
         self.num_params = 0
+        self.current_observation = (0, 0, 0)
 
     def step(self, action: int):
         circuit_finished = action == 0
@@ -110,16 +113,39 @@ class CircuitEnv(gym.Env):
 
 
 def double_dqn(
+    learning_rate: float = 0.02,
+    discount_factor: float = 0.9,
+    batch_size: int = 32,
+) -> DQNConfig:
+    return DQNConfig(ApexDQN).training(
+        lr=learning_rate,
+        gamma=discount_factor,
+        train_batch_size=batch_size,
+        double_q=True,
+    )
+
+
+def sac(
+    learning_rate: float = 0.02,
+    discount_factor: float = 0.9,
+    batch_size: int = 32,
+) -> SACConfig:
+    return SACConfig().training(
+        lr=learning_rate,
+        gamma=discount_factor,
+        train_batch_size=batch_size,
+    )
+
+
+def build_algorithm(
+    config: AlgorithmConfig,
     u: QuantumCircuit,
     actions: Sequence[NativeInstruction],
     max_depth: int,
     epsilon_greedy_episodes: Sequence[Tuple[float, int]],
-    learning_rate: float = 0.02,
-    discount_factor: float = 0.9,
-    batch_size: int = 32,
     cx_penalty_weight: float = 0.0,
-) -> DQN:
-
+    num_gpus: int = 0,
+) -> Algorithm:
     # Construct epsilon greedy exploration schedule as a step function
     endpoints = []
     total_episodes = 0
@@ -127,21 +153,16 @@ def double_dqn(
         endpoints.append((total_episodes * max_depth, epsilon))
         total_episodes += num_episodes
         endpoints.append((total_episodes * max_depth, epsilon))
+    epsilon_schedule = PiecewiseSchedule(endpoints, outside_value=epsilon_greedy_episodes[-1][0])
 
-    config = (DQNConfig()
-        .training(
-            lr=learning_rate,
-            gamma=discount_factor,
-            train_batch_size=batch_size,
-            double_q=True,
-        )
-        .rollouts(
+    (
+        config.rollouts(
             num_rollout_workers=6,
             ignore_worker_failures=True,
             recreate_failed_workers=True,
             restart_failed_sub_environments=True,
         )
-        .resources(num_gpus=0)
+        .resources(num_gpus=num_gpus)
         .framework('torch')
         .debugging(log_level='INFO')
         .environment(
@@ -156,23 +177,22 @@ def double_dqn(
         .exploration(
             exploration_config={
                 'type': 'EpsilonGreedy',
-                # TODO: Fix problem with epsilon schedule
-                # 'epsilon_schedule': PiecewiseSchedule(endpoints),
+                'epsilon_schedule': epsilon_schedule,
             }
         )
     )
 
-    return ApexDQN(config)
+    return config.build()
 
 
-if __name__ == '__main__':
-    from qiskit.circuit.library import SXGate, RZGate, CXGate, QFT
+def main():
+    from qiskit.circuit.library import SXGate, RZGate, CXGate
 
     u = QuantumCircuit(2)
-    u.swap(0, 1)
+    u.ch(0, 1)
 
     sx = SXGate()
-    rz = RZGate(Parameter('a'))
+    rz = RZGate(Parameter('x'))
     cx = CXGate()
 
     actions = [
@@ -184,12 +204,12 @@ if __name__ == '__main__':
         NativeInstruction(cx, (1, 0)),
     ]
 
-    algo = double_dqn(
-        u,
-        actions,
-        3,
-        [(1.0, 100), (0.5, 50), (0.1, 50)],
-    )
+    config = sac()
+    algo = build_algorithm(config, u, actions, 6, [(1.0, 250), (0.5, 100), (0.1, 100)])
 
-    for _ in range(10):
+    for _ in range(50):
         algo.train()
+
+
+if __name__ == '__main__':
+    main()
