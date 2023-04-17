@@ -1,6 +1,6 @@
 
 import itertools
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple, Type
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -10,7 +10,7 @@ from qiskit.circuit import Parameter
 
 from ray.rllib.algorithms import AlgorithmConfig, Algorithm
 from ray.rllib.algorithms.apex_dqn import ApexDQN
-from ray.rllib.algorithms.dqn import DQNConfig
+from ray.rllib.algorithms.dqn import DQNConfig, DQN
 from ray.rllib.algorithms.sac import SACConfig
 from ray.rllib.utils.schedules import PiecewiseSchedule
 
@@ -58,6 +58,21 @@ class CircuitEnv(gym.Env):
         self.v = QuantumCircuit(self.u.num_qubits)
         self.num_params = 0
         self.current_observation = (0, 0, 0)
+
+    @classmethod
+    def from_args(
+        cls,
+        u: QuantumCircuit,
+        actions: Sequence[NativeInstruction],
+        max_depth: int,
+        cx_penalty_weight: float = 0.0,
+    ) -> 'CircuitEnv':
+        return cls({
+            'u': u,
+            'actions': actions,
+            'max_depth': max_depth,
+            'cx_penalty_weight': cx_penalty_weight,
+        })
 
     def step(self, action: int):
         circuit_finished = action == 0
@@ -112,16 +127,18 @@ class CircuitEnv(gym.Env):
         return 1 - cost - cx_penalty
 
 
-def double_dqn(
+def dqn(
+    algo_class: Type[DQN] = ApexDQN,
     learning_rate: float = 0.02,
     discount_factor: float = 0.9,
-    batch_size: int = 32,
+    batch_size: int = 128,
+    double_q: bool = True,
 ) -> DQNConfig:
-    return DQNConfig(ApexDQN).training(
+    return DQNConfig(algo_class).training(
         lr=learning_rate,
         gamma=discount_factor,
         train_batch_size=batch_size,
-        double_q=True,
+        double_q=double_q,
     )
 
 
@@ -157,6 +174,7 @@ def build_algorithm(
 
     (
         config.rollouts(
+            batch_mode='complete_episodes',
             num_rollout_workers=6,
             ignore_worker_failures=True,
             recreate_failed_workers=True,
@@ -186,29 +204,30 @@ def build_algorithm(
 
 
 def main():
-    from qiskit.circuit.library import SXGate, RZGate, CXGate
+    from vqc_double_q import build_native_instructions
 
     u = QuantumCircuit(2)
     u.ch(0, 1)
 
-    sx = SXGate()
-    rz = RZGate(Parameter('x'))
-    cx = CXGate()
+    actions = build_native_instructions(2)
 
-    actions = [
-        NativeInstruction(sx, (0,)),
-        NativeInstruction(sx, (1,)),
-        NativeInstruction(rz, (0,)),
-        NativeInstruction(rz, (1,)),
-        NativeInstruction(cx, (0, 1)),
-        NativeInstruction(cx, (1, 0)),
-    ]
+    algo = build_algorithm(dqn(), u, actions, 6, [(1.0, 400), (0.5, 200), (0.1, 200)])
 
-    config = sac()
-    algo = build_algorithm(config, u, actions, 6, [(1.0, 250), (0.5, 100), (0.1, 100)])
-
-    for _ in range(50):
+    for _ in range(10):
         algo.train()
+
+    env = CircuitEnv.from_args(u, actions, 6)
+    observation, _ = env.reset()
+
+    while True:
+        action = algo.compute_single_action(observation, explore=False)
+        observation, reward, terminated, _, _ = env.step(action)
+
+        if terminated:
+            print(reward)
+            break
+
+    print(env.v.draw())
 
 
 if __name__ == '__main__':
