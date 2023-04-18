@@ -50,6 +50,7 @@ def vqc_double_q_learning(
     learning_rate: float = 0.02,
     discount_factor: float = 0.9,
     batch_size: int = 128,
+    use_tqdm: bool = True,
 ) -> Tuple[QuantumCircuit, float]:
     q_a, q_b = {}, {}
 
@@ -65,7 +66,11 @@ def vqc_double_q_learning(
     best_reward = 0.0
 
     for epsilon, num_episodes in epsilon_greedy_episodes:
-        for _ in tqdm(range(num_episodes), desc=f'{epsilon = }'):
+        episodes_iterable = range(num_episodes)
+        if use_tqdm:
+            episodes_iterable = tqdm(episodes_iterable, desc=f'{epsilon = }')
+
+        for _ in episodes_iterable:
             obs, _ = env.reset()
             seq = []
             reward = 0.0
@@ -96,7 +101,7 @@ def vqc_double_q_learning(
                             learning_rate * (intermediate_reward + discount_factor) + max_q(q_b, obs_tp1)
                         )
                     else:
-                        q_a[(obs_t, action)] = (
+                        q_b[(obs_t, action)] = (
                             (1 - learning_rate) * q_b.get((obs_t, action), 0.0) +
                             learning_rate * (intermediate_reward + discount_factor) + max_q(q_a, obs_tp1)
                         )
