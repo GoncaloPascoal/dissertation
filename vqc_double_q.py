@@ -11,6 +11,7 @@ from tqdm import tqdm
 from rl import CircuitEnv
 from utils import NativeInstruction
 
+
 Observation = Tuple[int, int, int]
 Action = int
 
@@ -51,16 +52,19 @@ def vqc_double_q_learning(
     discount_factor: float = 0.9,
     batch_size: int = 128,
     use_tqdm: bool = True,
+    seed: Optional[int] = None,
 ) -> Tuple[QuantumCircuit, float]:
+    if seed is not None:
+        random.seed(seed)
+
     q_a, q_b = {}, {}
 
     replay_buffer = []
     env = CircuitEnv.from_args(u, actions, length, cx_penalty_weight)
     env_actions = list(range(env.action_space.n))
 
-    def max_q(q: Dict[Tuple[Observation, Action], float], obs: Observation) -> float:
-        max_action = max(env_actions, key=lambda a: q.get((obs, a), 0.0))
-        return q.get((obs, max_action), 0.0)
+    def max_action(q: Dict[Tuple[Observation, Action], float], obs: Observation) -> float:
+        return max(env_actions, key=lambda a: q.get((obs, a), 0.0))
 
     best_v = QuantumCircuit(u.num_qubits)
     best_reward = 0.0
@@ -97,13 +101,13 @@ def vqc_double_q_learning(
                 for (obs_t, action), (obs_tp1, _) in zip(sample, sample[1:]):
                     if y < 0.5:
                         q_a[(obs_t, action)] = (
-                            (1 - learning_rate) * q_a.get((obs_t, action), 0.0) +
-                            learning_rate * (intermediate_reward + discount_factor) + max_q(q_b, obs_tp1)
+                            (1 - learning_rate) * q_a.get((obs_t, action), 0.0) + learning_rate *
+                            (intermediate_reward + discount_factor * q_b.get(max_action(q_a, obs_tp1), 0.0))
                         )
                     else:
                         q_b[(obs_t, action)] = (
-                            (1 - learning_rate) * q_b.get((obs_t, action), 0.0) +
-                            learning_rate * (intermediate_reward + discount_factor) + max_q(q_a, obs_tp1)
+                            (1 - learning_rate) * q_b.get((obs_t, action), 0.0) + learning_rate *
+                            (intermediate_reward + discount_factor * q_a.get(max_action(q_b, obs_tp1), 0.0))
                         )
 
     return best_v, best_reward
