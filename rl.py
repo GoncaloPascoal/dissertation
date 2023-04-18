@@ -31,7 +31,6 @@ class CircuitEnv(gym.Env):
         self.circuit_actions: List[NativeInstruction] = [
             a for a in context['actions'] if CircuitEnv._is_valid_action(a)
         ]
-        num_circuit_actions = len(self.circuit_actions)
 
         def grouper(action: NativeInstruction):
             return action.instruction.name
@@ -47,7 +46,7 @@ class CircuitEnv(gym.Env):
         self.action_observation_map = action_observation_map
         self.qubit_observation_map = {qubits: i for i, qubits in enumerate(qubit_set)}
 
-        self.action_space = spaces.Discrete(num_circuit_actions + 1)
+        self.action_space = spaces.Discrete(len(self.circuit_actions))
         self.observation_space = spaces.Tuple((
             spaces.Discrete(len(self.action_observation_map) + 1),
             spaces.Discrete(len(self.qubit_observation_map) + 1),
@@ -75,29 +74,26 @@ class CircuitEnv(gym.Env):
         })
 
     def step(self, action: int):
-        circuit_finished = action == 0
+        instruction, qubits = self.circuit_actions[action - 1]
 
-        if not circuit_finished:
-            instruction, qubits = self.circuit_actions[action - 1]
+        # Give unique name to each instruction parameter
+        if instruction.params:
+            instruction = instruction.copy()
+            new_params = []
+            for _ in instruction.params:
+                new_params.append(Parameter(f'p{self.num_params}'))
+                self.num_params += 1
+            instruction.params = new_params
 
-            # Give unique name to each instruction parameter
-            if instruction.params:
-                instruction = instruction.copy()
-                new_params = []
-                for _ in instruction.params:
-                    new_params.append(Parameter(f'p{self.num_params}'))
-                    self.num_params += 1
-                instruction.params = new_params
-
-            self.v.append(instruction, qubits)
-            self.current_observation = (
-                self.action_observation_map[instruction.name],
-                self.qubit_observation_map[qubits],
-                self.depth
-            )
+        self.v.append(instruction, qubits)
+        self.current_observation = (
+            self.action_observation_map[instruction.name],
+            self.qubit_observation_map[qubits],
+            self.depth
+        )
 
         reward = 0.0
-        terminated = self.depth == self.max_depth or circuit_finished
+        terminated = self.depth == self.max_depth
         if terminated:
             # Optimize continuous parameters using gradient descent
             params, cost = gradient_based_hst_weighted(self.u, self.v)
