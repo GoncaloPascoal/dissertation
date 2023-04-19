@@ -1,4 +1,5 @@
 
+import logging
 import random
 from collections.abc import Iterable, Sequence
 from typing import Tuple, Optional, List, Dict
@@ -6,7 +7,8 @@ from typing import Tuple, Optional, List, Dict
 from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter
 from qiskit.circuit.library import SXGate, RZGate, CXGate
-from tqdm import tqdm
+from rich.logging import RichHandler
+from tqdm.rich import tqdm_rich
 
 from rl import CircuitEnv
 from utils import NativeInstruction
@@ -14,6 +16,10 @@ from utils import NativeInstruction
 
 Observation = Tuple[int, int, int]
 Action = int
+
+_logger = logging.getLogger(__name__)
+_logger.setLevel(logging.INFO)
+_logger.addHandler(RichHandler())
 
 
 def build_native_instructions(
@@ -72,7 +78,7 @@ def vqc_double_q_learning(
     for epsilon, num_episodes in epsilon_greedy_episodes:
         episodes_iterable = range(num_episodes)
         if use_tqdm:
-            episodes_iterable = tqdm(episodes_iterable, desc=f'{epsilon = }')
+            episodes_iterable = tqdm_rich(episodes_iterable, desc=f'{epsilon = }')
 
         for _ in episodes_iterable:
             obs, _ = env.reset()
@@ -93,6 +99,7 @@ def vqc_double_q_learning(
 
             if reward > best_reward:
                 best_v, best_reward = env.v.copy(), reward
+                _logger.info(f'Best reward increased to {reward:.4f}')
 
             for sample, sample_reward in random.sample(replay_buffer, min(batch_size, len(replay_buffer))):
                 y = random.random()

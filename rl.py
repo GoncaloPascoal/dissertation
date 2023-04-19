@@ -6,7 +6,6 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from qiskit import QuantumCircuit
-from qiskit.circuit import Parameter
 
 from ray.rllib.algorithms import AlgorithmConfig, Algorithm
 from ray.rllib.algorithms.apex_dqn import ApexDQN
@@ -14,6 +13,7 @@ from ray.rllib.algorithms.dqn import DQNConfig, DQN
 from ray.rllib.algorithms.sac import SACConfig
 from ray.rllib.utils.schedules import PiecewiseSchedule
 
+from auto_parameter import ParameterGenerator
 from gradient_based import gradient_based_hst_weighted
 from utils import NativeInstruction
 
@@ -55,7 +55,9 @@ class CircuitEnv(gym.Env):
         self.reward_range = (-self.cx_penalty_weight, 1.0)
 
         self.v = QuantumCircuit(self.u.num_qubits)
-        self.num_params = 0
+        self.params = []
+        self.cost = 1.0
+        self.param_gen = ParameterGenerator()
         self.current_observation = (0, 0, 0)
 
     @classmethod
@@ -75,15 +77,8 @@ class CircuitEnv(gym.Env):
 
     def step(self, action: int):
         instruction, qubits = self.circuit_actions[action - 1]
-
-        # Give unique name to each instruction parameter
         if instruction.params:
-            instruction = instruction.copy()
-            new_params = []
-            for _ in instruction.params:
-                new_params.append(Parameter(f'p{self.num_params}'))
-                self.num_params += 1
-            instruction.params = new_params
+            instruction = self.param_gen.parametrize(instruction)
 
         self.v.append(instruction, qubits)
         self.current_observation = (
@@ -96,8 +91,8 @@ class CircuitEnv(gym.Env):
         terminated = self.depth == self.max_depth
         if terminated:
             # Optimize continuous parameters using gradient descent
-            params, cost = gradient_based_hst_weighted(self.u, self.v)
-            reward = self._reward(cost)
+            self.params, self.cost = gradient_based_hst_weighted(self.u, self.v)
+            reward = self._reward()
 
         return self.current_observation, reward, terminated, False, {}
 
@@ -105,7 +100,7 @@ class CircuitEnv(gym.Env):
         super().reset(seed=seed, options=options)
 
         self.v = QuantumCircuit(self.u.num_qubits)
-        self.num_params = 0
+        self.param_gen = ParameterGenerator()
         self.current_observation = (len(self.action_observation_map), len(self.qubit_observation_map), self.depth)
 
         return self.current_observation, {}
@@ -114,13 +109,13 @@ class CircuitEnv(gym.Env):
     def depth(self):
         return len(self.v)
 
-    def _reward(self, cost: float) -> float:
+    def _reward(self) -> float:
         instructions = self.v.data
         n_total = len(instructions)
         n_cx = len([i for i in instructions if i.operation.name == 'cx'])
         cx_penalty = 0.0 if n_total == 0 else self.cx_penalty_weight * n_cx / n_total
 
-        return 1 - cost - cx_penalty
+        return 1 - self.cost - cx_penalty
 
 
 def dqn(
