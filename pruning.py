@@ -1,12 +1,11 @@
 
 from math import pi
-from typing import Callable, List, Sequence, Optional, Tuple
-
-import numpy as np
+from typing import Sequence, Tuple
 
 from qiskit import QuantumCircuit
 
 from utils import ContinuousOptimizationFunction, remove_parametrized_instruction
+
 
 def iterative_pruning(
     u: QuantumCircuit,
@@ -41,15 +40,15 @@ def iterative_pruning(
 
     return v, params, cost
 
-if __name__ == '__main__':
-    from qiskit_aer import AerSimulator
+
+def main():
     from qiskit.circuit import Parameter
 
     from gradient_based import gradient_based_hst_weighted
 
     u = QuantumCircuit(1)
     v = QuantumCircuit(1)
-    
+
     u.h(0)
 
     v.rz(Parameter('a'), 0)
@@ -59,5 +58,10 @@ if __name__ == '__main__':
 
     v, params, cost = iterative_pruning(u, v, gradient_based_hst_weighted)
     print(v.draw())
+
     params_pi = [f'{p / pi:4f}π' for p in params]
     print(f'The best parameters were {params_pi} with a cost of {cost}.')
+
+
+if __name__ == '__main__':
+    main()

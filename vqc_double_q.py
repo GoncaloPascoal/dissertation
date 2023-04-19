@@ -2,6 +2,7 @@
 import logging
 import random
 from collections.abc import Iterable, Sequence
+from math import pi
 from typing import Tuple, Optional, List, Dict
 
 from qiskit import QuantumCircuit
@@ -57,9 +58,10 @@ def vqc_double_q_learning(
     learning_rate: float = 0.02,
     discount_factor: float = 0.9,
     batch_size: int = 128,
+    tolerance: float = 1e-2,
     use_tqdm: bool = True,
     seed: Optional[int] = None,
-) -> Tuple[QuantumCircuit, float]:
+) -> Tuple[QuantumCircuit, Sequence[float], float]:
     if seed is not None:
         random.seed(seed)
 
@@ -101,6 +103,9 @@ def vqc_double_q_learning(
                 best_v, best_reward = env.v.copy(), reward
                 _logger.info(f'Best reward increased to {reward:.4f}')
 
+                if env.cost < tolerance:
+                    return best_v, env.params.copy(), env.cost
+
             for sample, sample_reward in random.sample(replay_buffer, min(batch_size, len(replay_buffer))):
                 y = random.random()
                 intermediate_reward = sample_reward / length
@@ -117,7 +122,7 @@ def vqc_double_q_learning(
                             (intermediate_reward + discount_factor * q_a.get(max_action(q_b, obs_tp1), 0.0))
                         )
 
-    return best_v, best_reward
+    return best_v, env.params.copy(), env.cost
 
 
 def main():
@@ -131,8 +136,11 @@ def main():
     epsilon_greedy_episodes = [(1.0, 1500), (0.9, 100), (0.8, 100), (0.7, 100), (0.6, 150),
                                (0.5, 150),  (0.4, 150), (0.3, 150), (0.2, 150), (0.1, 150)]
 
-    best_v, best_reward = vqc_double_q_learning(u, actions, epsilon_greedy_episodes, 6)
-    print(best_v, best_reward)
+    v, params, cost = vqc_double_q_learning(u, actions, epsilon_greedy_episodes, 6)
+    print(v.draw())
+
+    params_pi = [f'{p / pi:.4f}π' for p in params]
+    print(f'The best parameters were {params_pi} with a cost of {cost:.4f}.')
 
 
 if __name__ == '__main__':
