@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from qiskit_aer import AerSimulator
-from qiskit_aer.noise import NoiseModel
 from qiskit import QuantumCircuit, transpile
 from qiskit.providers.backend import Backend
 
@@ -87,6 +86,8 @@ def visualize_gradient(
     base_params: Optional[np.ndarray] = None,
     param_indices: Tuple[int, int] = (0, 1),
 ):
+    assert 0 <= q <= 1
+    assert samples > 0
     assert v.num_parameters >= 2
 
     if base_params is None:
@@ -132,6 +133,8 @@ def visualize_cost_function(
     base_params: Optional[np.ndarray] = None,
     param_indices: Tuple[int, int] = (0, 1),
 ):
+    assert 0 <= q <= 1
+    assert samples > 0
     assert v.num_parameters >= 2
 
     if base_params is None:
@@ -169,16 +172,17 @@ def gradient_based_hst_weighted(
     tolerance: float = 1.0e-3,
     max_iterations: int = 50,
     sample_precision: float = 1.0e-3,
-    noise_model: Optional[NoiseModel] = None,
+    backend: Optional[Backend] = None,
 ) -> ContinuousOptimizationResult:
-    assert 0 < tolerance < 1
     assert 0 <= q <= 1
+    assert 0 < tolerance < 1
     assert max_iterations > 0
     assert sample_precision > 0
 
-    cost_function = _create_cost_function(u, v, q, sample_precision, noise_model)
+    rng = np.random.default_rng()
+    cost_function = _create_cost_function(u, v, q, sample_precision, backend)
 
-    params = np.zeros(v.num_parameters)
+    params = rng.uniform(-pi, pi, v.num_parameters)
     cost = cost_function(params)
 
     if v.num_parameters != 0:
@@ -199,14 +203,12 @@ def gradient_based_hst_weighted(
             cost_2 = cost_function(params_2)
             if cost - cost_2 >= learning_rate * gradient_norm:
                 learning_rate *= 2
-                params = params_2
-                cost = cost_2
+                params, cost = params_2, cost_2
             else:
                 cost_1 = cost_function(params_1)
                 if cost - cost_1 < learning_rate / 2 * gradient_norm:
                     learning_rate /= 2
-                params = params_1
-                cost = cost_1
+                params, cost = params_1, cost_1
 
             i += 1
 
@@ -230,6 +232,6 @@ if __name__ == '__main__':
     v.rz(Parameter('c'), 1)
     v.sx(1)
 
-    best_params, best_cost = gradient_based_hst_weighted(u, v, q=0.5, tolerance=1e-8)
-    best_params_pi = [f'{p / pi:4f}π' for p in normalize_angles(best_params)]
+    best_params, best_cost = gradient_based_hst_weighted(u, v)
+    best_params_pi = [f'{p / pi:.4f}π' for p in normalize_angles(best_params)]
     print(f'The best parameters were {best_params_pi} with a cost of {best_cost}.')
