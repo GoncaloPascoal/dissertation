@@ -69,7 +69,7 @@ def vqc_double_q_learning(
     env = CircuitEnv.from_args(u, actions, length, cx_penalty_weight)
     env_actions = list(range(env.action_space.n))
 
-    def max_action(q: Dict[Tuple[Observation, Action], float], obs: Observation) -> float:
+    def max_action(q: Dict[Tuple[Observation, Action], float], obs: Observation) -> Action:
         return max(env_actions, key=lambda a: q.get((obs, a), 0.0))
 
     best_v = QuantumCircuit(u.num_qubits)

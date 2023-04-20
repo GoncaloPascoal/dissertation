@@ -1,6 +1,6 @@
 
 from math import pi
-from typing import List, Optional, Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 from qiskit_aer import AerSimulator
@@ -58,6 +58,7 @@ def gradient_free_hst(
 
     return ContinuousOptimizationResult(best_params, best_cost)
 
+
 def gradient_free_bisection(
     u: QuantumCircuit,
     v: QuantumCircuit,
@@ -80,7 +81,7 @@ def gradient_free_bisection(
 
     qc = transpile(HilbertSchmidt(u, v), sim)
 
-    def cost_function(params: List[float]) -> float:
+    def cost_function(params: Sequence[float]) -> float:
         qc_bound = qc.bind_parameters(params)
         counts = sim.run(qc_bound).result().get_counts()
         return cost_hst(counts)
@@ -109,18 +110,25 @@ def gradient_free_bisection(
     return ContinuousOptimizationResult(best_params, best_cost)
 
 
-if __name__ == '__main__':
+def main():
     from qiskit.circuit import Parameter
     from rich import print
 
-    u = QuantumCircuit(1)
-    u.h(0)
+    u = QuantumCircuit(2)
+    u.ch(0, 1)
 
-    v = QuantumCircuit(1)
-    v.rz(Parameter('a'), 0)
-    v.sx(0)
-    v.rz(Parameter('b'), 0)
+    v = QuantumCircuit(2)
+    v.rz(Parameter('a'), 1)
+    v.sx(1)
+    v.rz(Parameter('b'), 1)
+    v.cx(0, 1)
+    v.rz(Parameter('c'), 1)
+    v.sx(1)
 
     best_params, best_cost = gradient_free_hst(u, v)
     best_params_pi = [f'{p / pi:4f}π' for p in best_params]
     print(f'The best parameters were {best_params_pi} with a cost of {best_cost}.')
+
+
+if __name__ == '__main__':
+    main()
