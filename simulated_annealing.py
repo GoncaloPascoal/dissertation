@@ -14,6 +14,7 @@ from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGOpNode
 
 from rich.logging import RichHandler
+from tqdm.rich import tqdm_rich
 
 from auto_parameter import auto_parametrize
 from utils import ContinuousOptimizationFunction, ContinuousOptimizationResult
@@ -260,6 +261,7 @@ class SimulatedAnnealing:
 
     def run(self) -> Tuple[QuantumCircuit, Sequence[float], float]:
         i = 1
+        progress = tqdm_rich(initial=i, total=self.max_iterations)
         while i < self.max_iterations:
             if self.best_cost < self.tolerance:
                 break
@@ -278,6 +280,7 @@ class SimulatedAnnealing:
             if cost_penalty <= 0 or random.random() <= exp(-cost_penalty / self.temperature):
                 self.v, self.current_cost = neighbor, cost
                 i += 1
+                progress.update(1)
 
             # Annealing schedule
             self.temperature = self.initial_temperature * pow(1.0 - i / self.max_iterations, self.beta)
@@ -287,7 +290,6 @@ class SimulatedAnnealing:
 
 def main():
     from qiskit.circuit.library import QFT
-    from qiskit import transpile
 
     u = QuantumCircuit(2)
     u.swap(0, 1)
