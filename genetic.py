@@ -9,7 +9,7 @@ import numpy as np
 from qiskit import QuantumCircuit
 from rich.logging import RichHandler
 
-from auto_parameter import ParameterGenerator
+from parameter_generator import ParameterGenerator
 from gradient_based import gradient_based_hst_weighted
 from rl import NativeInstruction
 from utils import create_native_instruction_dict, ContinuousOptimizationFunction
@@ -311,7 +311,7 @@ class GeneticAlgorithm:
         for name, qubits in genome:
             instruction = self.instruction_dict[name][0]
             if instruction.is_parameterized():
-                instruction = gen.parametrize(instruction)
+                instruction = gen.parameterize(instruction)
             v.append(instruction, qubits)
 
         return v

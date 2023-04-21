@@ -13,7 +13,7 @@ from ray.rllib.algorithms.dqn import DQNConfig, DQN
 from ray.rllib.algorithms.sac import SACConfig
 from ray.rllib.utils.schedules import PiecewiseSchedule
 
-from auto_parameter import ParameterGenerator
+from parameter_generator import ParameterGenerator
 from gradient_based import gradient_based_hst_weighted
 from utils import NativeInstruction
 
@@ -78,7 +78,7 @@ class CircuitEnv(gym.Env):
     def step(self, action: int):
         instruction, qubits = self.circuit_actions[action - 1]
         if instruction.params:
-            instruction = self.param_gen.parametrize(instruction)
+            instruction = self.param_gen.parameterize(instruction)
 
         self.v.append(instruction, qubits)
         self.current_observation = (

@@ -16,7 +16,7 @@ from qiskit.dagcircuit import DAGOpNode
 from rich.logging import RichHandler
 from tqdm.rich import tqdm_rich
 
-from auto_parameter import auto_parametrize
+from parameter_generator import ParameterGenerator
 from utils import ContinuousOptimizationFunction, ContinuousOptimizationResult
 
 from rich import print
@@ -79,6 +79,8 @@ class SimulatedAnnealing:
         self.current_cost = self.best_cost
         self.temperature = initial_temperature
 
+        self.param_gen = ParameterGenerator()
+
         self._logger.info(f'Initial circuit has cost {self.best_cost:.4f}')
 
     def _is_valid_instruction(self, instruction: NativeInstruction) -> bool:
@@ -93,7 +95,7 @@ class SimulatedAnnealing:
             instruction, qubits = random.choice(self.native_instructions)
 
             if instruction.is_parameterized():
-                instruction = auto_parametrize(instruction)
+                instruction = self.param_gen.parameterize(instruction)
 
             qc.append(instruction, qubits)
 
@@ -129,7 +131,7 @@ class SimulatedAnnealing:
         qc = self.v.copy_empty_like()
 
         if new_instruction.is_parameterized():
-            new_instruction = auto_parametrize(new_instruction)
+            new_instruction = self.param_gen.parameterize(new_instruction)
 
         for i, instruction in enumerate(self.v.data):
             if i == idx:
@@ -142,7 +144,7 @@ class SimulatedAnnealing:
         qc = self.v.copy_empty_like()
 
         if new_instruction.is_parameterized():
-            new_instruction = auto_parametrize(new_instruction)
+            new_instruction = self.param_gen.parameterize(new_instruction)
 
         for i, instruction in enumerate(self.v.data):
             if i == idx:
@@ -210,7 +212,7 @@ class SimulatedAnnealing:
                     ])
 
                     if new_instruction.is_parameterized():
-                        new_instruction = auto_parametrize(new_instruction)
+                        new_instruction = self.param_gen.parameterize(new_instruction)
 
                     neighbor = self.v.compose(new_instruction, qubits)
             case NeighborhoodType.CHANGE_INSTRUCTION:

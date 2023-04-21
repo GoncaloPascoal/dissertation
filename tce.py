@@ -14,7 +14,7 @@ from qiskit.converters import circuit_to_dag
 
 from rich import print
 
-from auto_parameter import ParameterGenerator
+from parameter_generator import ParameterGenerator
 
 
 class TransformationCircuitEnv(gym.Env):
@@ -95,7 +95,7 @@ class TransformationCircuitEnv(gym.Env):
                     qubits = self.qubit_callbacks.get(idx, self._default_qubit_callback)(first_qubit)
 
                     if instruction.is_parameterized():
-                        instruction = self.param_gen.parametrize(instruction)
+                        instruction = self.param_gen.parameterize(instruction)
 
                     qc.append(instruction, qubits)
 
