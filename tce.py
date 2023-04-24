@@ -1,43 +1,84 @@
 
-from collections.abc import Callable, Sequence
-import functools
-import operator
-from typing import Any, Dict, Literal, Tuple
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, Dict, Literal, Tuple, List
 
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from nptyping import Int8, NDArray
 from qiskit import QuantumCircuit
-from qiskit.circuit import Instruction
+from qiskit.circuit import Instruction, ParameterExpression
 from qiskit.converters import circuit_to_dag
 
 from rich import print
 
 from parameter_generator import ParameterGenerator
+from utils import index_with_key
+
+
+def default_qubit_callback(qubit: int) -> Tuple[int, ...]:
+    return qubit,
+
+def nn_qubit_callback(qubit: int) -> Tuple[int, ...]:
+    return qubit, qubit + 1
+
+def nn_qubit_callback_reversed(qubit: int) -> Tuple[int, ...]:
+    return qubit + 1, qubit
+
+
+@dataclass
+class InstructionCallback:
+    QubitCallback = Callable[[int], Tuple[int, ...]]
+
+    instruction: Instruction
+    qubit_callback: QubitCallback = default_qubit_callback
+
+    def equals_instruction(
+        self,
+        other: Instruction,
+        other_qubits: Tuple[int, ...],
+        qubit: int,
+    ) -> bool:
+        if (
+            self.instruction.name != other.name or
+            self.qubit_callback(qubit) != other_qubits or
+            len(self.instruction.params) != len(other.params)
+        ):
+            return False
+
+        for param, other_param in zip(self.instruction.params, other.params):
+            if not isinstance(param, ParameterExpression) and param != other_param:
+                return False
+
+        return True
+
+    def __call__(self, param_gen: ParameterGenerator, qc: QuantumCircuit, qubit: int):
+        instruction = self.instruction
+        if self.instruction.is_parameterized():
+            instruction = param_gen.parameterize(instruction)
+
+        qc.append(instruction, self.qubit_callback(qubit))
 
 
 class TransformationCircuitEnv(gym.Env):
     Observation = NDArray[Literal['*, *, *'], Int8]
     Action = int
 
-    QubitCallback = Callable[[int], Tuple[int, ...]]
+    TransformationCallback = Callable[[ParameterGenerator, QuantumCircuit, int, int], None]
 
     def __init__(self, context: Dict[str, Any]):
         self.u: QuantumCircuit = context['u']
-        self.native_instructions: Sequence[Instruction] = context['native_instructions']
-        self.qubit_callbacks: Dict[int, TransformationCircuitEnv.QubitCallback] = context['qubit_callbacks']
         self.max_depth: int = context['max_depth']
+        self.instruction_callbacks: List[InstructionCallback] = context['instruction_callbacks']
+        self.transformation_callbacks = context['transformation_callbacks']
 
-        self.instruction_map = {
-            instruction.name: i for i, instruction in enumerate(self.native_instructions)
-        }
         self.param_gen = ParameterGenerator()
 
         self.observation_space = spaces.MultiBinary(
-            (self.max_depth, self.u.num_qubits, len(self.native_instructions)),
+            (self.max_depth, self.u.num_qubits, len(self.instruction_callbacks)),
         )
-        self.action_space = spaces.Discrete(functools.reduce(operator.mul, self.observation_space.shape))
+        self.action_space = spaces.Discrete(self.max_depth * self.u.num_qubits * len(self.transformation_callbacks))
 
         self.current_observation = np.zeros(self.observation_space.shape)
 
@@ -45,15 +86,15 @@ class TransformationCircuitEnv(gym.Env):
     def from_args(
         cls,
         u: QuantumCircuit,
-        native_instructions: Sequence[Instruction],
-        qubit_callbacks: Dict[int, QubitCallback],
         max_depth: int,
+        instruction_callbacks: List[InstructionCallback],
+        transformation_callbacks: List[TransformationCallback],
     ) -> 'TransformationCircuitEnv':
         return cls({
             'u': u,
-            'native_instructions': native_instructions,
-            'qubit_callbacks': qubit_callbacks,
             'max_depth': max_depth,
+            'instruction_callbacks': instruction_callbacks,
+            'transformation_callbacks': transformation_callbacks,
         })
 
     def step(self, action: Action) -> Tuple[Observation, float, bool, bool, Dict[str, Any]]:
@@ -61,10 +102,6 @@ class TransformationCircuitEnv(gym.Env):
 
     def reset(self, *, seed=None, options=None) -> Tuple[Observation, Dict[str, Any]]:
         return self.current_observation, {}
-
-    @staticmethod
-    def _default_qubit_callback(q: int) -> Tuple[int, ...]:
-        return (q,)
 
     def _circuit_to_obs(self, qc: QuantumCircuit) -> Observation:
         if qc.depth() > self.max_depth:
@@ -75,10 +112,18 @@ class TransformationCircuitEnv(gym.Env):
 
         for layer_idx, layer in enumerate(dag.layers()):
             for op_node in layer['graph'].op_nodes(include_directives=False):
-                first_qubit = qc.find_bit(op_node.qargs[0]).index
-                instruction_type = self.instruction_map[op_node.name]
+                qubit = qc.find_bit(op_node.qargs[0]).index
+                qubits = tuple(qc.find_bit(q).index for q in op_node.qargs)
 
-                obs[layer_idx, first_qubit, instruction_type] = 1
+                try:
+                    instruction_idx = index_with_key(
+                        self.instruction_callbacks,
+                        lambda c: c.equals_instruction(op_node.op, qubits, qubit)
+                    )
+                except ValueError as ex:
+                    raise ValueError('Circuit is incompatible with target instruction set') from ex
+
+                obs[layer_idx, qubit, instruction_idx] = 1
 
         return obs
 
@@ -89,15 +134,7 @@ class TransformationCircuitEnv(gym.Env):
             for first_qubit, instructions in enumerate(layer):
                 indices = np.flatnonzero(instructions)
                 if indices.size > 0:
-                    idx = indices[0]
-
-                    instruction = self.native_instructions[idx]
-                    qubits = self.qubit_callbacks.get(idx, self._default_qubit_callback)(first_qubit)
-
-                    if instruction.is_parameterized():
-                        instruction = self.param_gen.parameterize(instruction)
-
-                    qc.append(instruction, qubits)
+                    self.instruction_callbacks[indices[0]](self.param_gen, qc, first_qubit)
 
         return qc
 
@@ -113,13 +150,15 @@ def main():
     rz = RZGate(Parameter('x'))
     cx = CXGate()
 
-    native_instructions = [sx, rz, cx, cx]
-    qubit_callbacks = {
-        2: lambda q: (q, q + 1),
-        3: lambda q: (q + 1, q),
-    }
+    instruction_callbacks = [
+        InstructionCallback(sx),
+        InstructionCallback(rz),
+        InstructionCallback(cx, nn_qubit_callback),
+        InstructionCallback(cx, nn_qubit_callback_reversed),
+    ]
 
-    env = TransformationCircuitEnv.from_args(u, native_instructions, qubit_callbacks, 6)
+    # TODO: transformation callbacks
+    env = TransformationCircuitEnv.from_args(u, 6, instruction_callbacks, [])
 
 
 if __name__ == '__main__':

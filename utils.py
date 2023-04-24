@@ -1,7 +1,7 @@
 
 import collections
 from math import pi
-from typing import Callable, Dict, List, Sequence, Set, Tuple, Type
+from typing import Callable, Dict, List, Sequence, Set, Tuple, Type, TypeVar
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import Instruction
@@ -65,3 +65,13 @@ def remove_parametrized_instruction(qc: QuantumCircuit, idx: int) -> QuantumCirc
 def normalize_angles(angles: Sequence[float]) -> List[float]:
     return [theta % (2 * pi) for theta in angles]
 
+
+T = TypeVar('T')
+
+
+def index_with_key(lst: List[T], key: Callable[[T], bool]) -> int:
+    for i, elem in enumerate(lst):
+        if key(elem):
+            return i
+
+    raise ValueError('Element not in list')
