@@ -1,20 +1,25 @@
 
+from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, Tuple, List
+from math import pi
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from nptyping import Int8, NDArray
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit, transpile
 from qiskit.circuit import Instruction, ParameterExpression
-from qiskit.converters import circuit_to_dag
-
-from rich import print
+from qiskit.circuit.exceptions import CircuitError
+from qiskit.converters import circuit_to_dag, dag_to_circuit
+from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 
 from parameter_generator import ParameterGenerator
-from utils import index_with_key
+from utils import ContinuousOptimizationFunction, index_with_key
+
+
+Observation = Tuple[np.ndarray, np.ndarray]
+Action = int
 
 
 def default_qubit_callback(qubit: int) -> Tuple[int, ...]:
@@ -61,76 +66,373 @@ class InstructionCallback:
         qc.append(instruction, self.qubit_callback(qubit))
 
 
+class TransformationRule(ABC):
+    def __init__(self, env: 'TransformationCircuitEnv'):
+        self.env = env
+
+    @abstractmethod
+    def is_valid(self, layer: int, qubit: int) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def perform(self, layer: int, qubit: int) -> QuantumCircuit:
+        raise NotImplementedError
+
+    def _dag_layers(self) -> List[DAGCircuit]:
+        dag = circuit_to_dag(self.env.current_circuit)
+        return [dct['graph'] for dct in dag.layers()]
+
+
+class SwapInstructions(TransformationRule):
+    def is_valid(self, layer: int, qubit: int) -> bool:
+        qc = self.env.current_circuit
+        layers = self._dag_layers()
+
+        if layer >= len(layers) - 1:
+            return False
+
+        inst_a = self.env.op_node_at(qc, layers[layer], qubit)
+        inst_b = self.env.op_node_at(qc, layers[layer + 1], qubit)
+
+        if inst_a is None or inst_b is None:
+            # Couldn't find instructions to swap at the specified location
+            return False
+
+        if inst_a.op == inst_b.op and inst_a.qargs == inst_b.qargs:
+            # Same instruction, swap operation will have no effect
+            return False
+
+        # Ensure that swapping gates will not increase circuit depth (there is no overlap with other gates)
+        qubits_a = set(qc.find_bit(q)[0] for q in inst_a.qargs)
+        qubits_b = set(qc.find_bit(q)[0] for q in inst_b.qargs)
+
+        for q in qubits_a - qubits_b:
+            if self.env.op_node_at(qc, layers[layer + 1], q) is not None:
+                return False
+
+        for q in qubits_b - qubits_a:
+            if self.env.op_node_at(qc, layers[layer], q) is not None:
+                return False
+
+        return True
+
+    def perform(self, layer: int, qubit: int) -> QuantumCircuit:
+        qc = self.env.current_circuit
+        dag = circuit_to_dag(qc)
+        layers = self._dag_layers()
+
+        inst_a = self.env.op_node_at(qc, layers[layer], qubit)
+        inst_b = self.env.op_node_at(qc, layers[layer + 1], qubit)
+
+        dag = dag.copy_empty_like()
+        for i, dag_layer in enumerate(layers):
+            for op_node in dag_layer.op_nodes(include_directives=False):
+                qubits = [qc.find_bit(q)[0] for q in op_node.qargs]
+
+                if i == layer and qubit in qubits:
+                    op_node = inst_b
+                elif i == layer + 1 and qubit in qubits:
+                    op_node = inst_a
+
+                dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
+
+        return dag_to_circuit(dag)
+
+
+class ShiftQubit(TransformationRule):
+    def __init__(self, env: 'TransformationCircuitEnv', down: bool):
+        super().__init__(env)
+        self.offset = 1 if down else -1
+
+    def is_valid(self, layer: int, qubit: int) -> bool:
+        qc = self.env.current_circuit
+        layers = self._dag_layers()
+
+        if layer >= len(layers):
+            return False
+
+        dag_layer = layers[layer]
+        inst = self.env.op_node_at(qc, dag_layer, qubit)
+
+        # Target location must contain an instruction
+        if inst is None:
+            return False
+
+        _, first_qubit = self.env.indices_from_op_node(qc, inst)
+
+        # Eliminate duplicate transformations for 2-qubit gates
+        if first_qubit != qubit:
+            return False
+
+        qubits_dst = tuple(qc.find_bit(q)[0] + self.offset for q in inst.qargs)
+
+        # Destination qubits are valid
+        if any(q not in range(self.env.num_qubits) for q in qubits_dst):
+            return False
+
+        for q in qubits_dst:
+            inst_dst = self.env.op_node_at(qc, dag_layer, q)
+            if inst_dst is not None and inst_dst != inst:
+                return False
+
+        return True
+
+    def perform(self, layer: int, qubit: int) -> QuantumCircuit:
+        qc = self.env.current_circuit
+        dag = circuit_to_dag(qc)
+        layers = self._dag_layers()
+        dag_layer = layers[layer]
+
+        inst = self.env.op_node_at(qc, dag_layer, qubit)
+        qubits = tuple(qc.find_bit(q)[0] for q in inst.qargs)
+        qargs_dst = tuple(qc.qubits[q + self.offset] for q in qubits)
+
+        dag = dag.copy_empty_like()
+        for i, dag_layer in enumerate(layers):
+            for op_node in dag_layer.op_nodes(include_directives=False):
+                if i == layer and qubit in qubits:
+                    op_node.qargs = qargs_dst
+
+                dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
+
+        return dag_to_circuit(dag)
+
+class ShiftQubitDown(ShiftQubit):
+    def __init__(self, env: 'TransformationCircuitEnv'):
+        super().__init__(env, True)
+
+class ShiftQubitUp(ShiftQubit):
+    def __init__(self, env: 'TransformationCircuitEnv'):
+        super().__init__(env, False)
+
+
+class RemoveInstruction(TransformationRule):
+    def is_valid(self, layer: int, qubit: int) -> bool:
+        qc = self.env.current_circuit
+        layers = self._dag_layers()
+
+        if layer >= len(layers):
+            return False
+
+        dag_layer = layers[layer]
+        op_node = self.env.op_node_at(qc, dag_layer, qubit)
+
+        if op_node is None:
+            return False
+
+        _, first_qubit = self.env.indices_from_op_node(qc, op_node)
+
+        # Eliminate duplicate transformations for 2-qubit gates
+        if first_qubit != qubit:
+            return False
+
+        return True
+
+    def perform(self, layer: int, qubit: int) -> QuantumCircuit:
+        qc = self.env.current_circuit
+        dag = circuit_to_dag(qc)
+        layers = [dct['graph'] for dct in dag.layers()]
+        dag_layer = layers[layer]
+
+        dag.remove_op_node(self.env.op_node_at(qc, dag_layer, qubit))
+        return dag_to_circuit(dag)
+
+
 class TransformationCircuitEnv(gym.Env):
-    Observation = NDArray[Literal['*, *, *'], Int8]
-    Action = int
-
-    TransformationCallback = Callable[[ParameterGenerator, QuantumCircuit, int, int], None]
-
     def __init__(self, context: Dict[str, Any]):
-        self.u: QuantumCircuit = context['u']
         self.max_depth: int = context['max_depth']
+        self.num_qubits: int = context['num_qubits']
         self.instruction_callbacks: List[InstructionCallback] = context['instruction_callbacks']
-        self.transformation_callbacks = context['transformation_callbacks']
+        self.transformation_rules: List[TransformationRule] = [cls(self) for cls in context['transformation_rules']]
+        self.continuous_optimization: ContinuousOptimizationFunction = context['continuous_optimization']
+        self.u: Optional[QuantumCircuit] = context.get('u', None)
 
+        if self.u is not None and self.u.num_qubits > self.num_qubits:
+            raise ValueError(f'Target circuit has {self.u.num_qubits} qubits but the observation space '
+                             f'only has {self.num_qubits} qubits')
+
+        self.rng = np.random.default_rng()
         self.param_gen = ParameterGenerator()
+        self.basis_gates = [callback.instruction.name for callback in self.instruction_callbacks]
 
-        self.observation_space = spaces.MultiBinary(
-            (self.max_depth, self.u.num_qubits, len(self.instruction_callbacks)),
-        )
-        self.action_space = spaces.Discrete(self.max_depth * self.u.num_qubits * len(self.transformation_callbacks))
+        num_actions = self.max_depth * self.num_qubits * len(self.transformation_rules)
+        # Use Box for observations instead of MultiBinary due to bugs with RLlib
+        self.observation_space: spaces.Tuple = spaces.Tuple((
+            spaces.Box(0.0, 1.0, shape=(num_actions,)),
+            spaces.Box(0, 1, shape=(self.max_depth, self.num_qubits, len(self.instruction_callbacks))),
+        ))
+        self.action_space: spaces.Discrete = spaces.Discrete(num_actions)
+        self.valid_actions: np.ndarray = np.zeros(num_actions)
 
-        self.current_observation = np.zeros(self.observation_space.shape)
+        self.current_circuit = QuantumCircuit(self.num_qubits)
+        self.current_cost = 1.0
+        self.target_circuit = QuantumCircuit(self.num_qubits)
+        self.epoch = 0
 
     @classmethod
     def from_args(
         cls,
-        u: QuantumCircuit,
         max_depth: int,
+        num_qubits: int,
         instruction_callbacks: List[InstructionCallback],
-        transformation_callbacks: List[TransformationCallback],
+        transformation_rules: List[Type[TransformationRule]],
+        continuous_optimization: ContinuousOptimizationFunction,
+        u: Optional[QuantumCircuit] = None,
     ) -> 'TransformationCircuitEnv':
         return cls({
-            'u': u,
             'max_depth': max_depth,
+            'num_qubits': num_qubits,
             'instruction_callbacks': instruction_callbacks,
-            'transformation_callbacks': transformation_callbacks,
+            'transformation_rules': transformation_rules,
+            'continuous_optimization': continuous_optimization,
+            'u': u,
         })
 
     def step(self, action: Action) -> Tuple[Observation, float, bool, bool, Dict[str, Any]]:
-        return self.current_observation, 0.0, False, False, {}
+        if not self.valid_actions[action]:
+            layer, qubit, rule = self._parse_action(action)
+            rule_type = self.transformation_rules[rule].__class__.__name__
+            raise ValueError(f'An invalid action was selected: {rule_type} on layer {layer} and qubit {qubit}')
+
+        layer, qubit, rule = np.unravel_index(
+            action,
+            shape=(self.max_depth, self.num_qubits, len(self.transformation_rules)),
+        )
+
+        next_circuit = self.transformation_rules[rule].perform(layer, qubit)
+        next_circuit = transpile(next_circuit, basis_gates=self.basis_gates)
+
+        self.current_circuit = next_circuit
+        self.epoch += 1
+
+        reward = self._reward(next_circuit)
+        terminated = self.epoch == 32
+
+        obs = self.current_observation()
+        self.valid_actions = obs[0]
+
+        return obs, reward, terminated, False, {}
 
     def reset(self, *, seed=None, options=None) -> Tuple[Observation, Dict[str, Any]]:
-        return self.current_observation, {}
+        if self.u is not None:
+            # Evaluation
+            self.current_circuit = self.u.copy()
+        else:
+            # Training
+            self.current_circuit = self._generate_random_circuit()
+
+        self.current_cost = 0.0
+        self.target_circuit = self.current_circuit.copy()
+        self.epoch = 0
+
+        obs = self.current_observation()
+        self.valid_actions = obs[0]
+
+        return obs, {}
+
+    def action_mask(self) -> np.ndarray:
+        actions = [self._parse_action(a) for a in range(self.action_space.n)]
+
+        return np.array([
+            self.transformation_rules[rule].is_valid(layer, qubit)
+            for layer, qubit, rule in actions
+        ])
+
+    def indices_from_op_node(self, qc: QuantumCircuit, op_node: DAGOpNode) -> Tuple[int, int]:
+        """
+        Returns the (observation) instruction and qubit indices corresponding to a specific ``DAGOpNode`` in a
+        ``QuantumCircuit``.
+
+        :raises ValueError: if the instruction represented by the ``DAGOpNode`` is not in the native instruction set.
+        """
+        qubit = min(qc.find_bit(q)[0] for q in op_node.qargs)
+        qubits = tuple(qc.find_bit(q).index for q in op_node.qargs)
+
+        try:
+            instruction_idx = index_with_key(
+                self.instruction_callbacks,
+                lambda c: c.equals_instruction(op_node.op, qubits, qubit)
+            )
+        except ValueError as ex:
+            raise ValueError('Circuit is incompatible with target instruction set') from ex
+
+        return instruction_idx, qubit
+
+    @staticmethod
+    def op_node_at(qc: QuantumCircuit, layer: DAGCircuit, qubit: int) -> Optional[DAGOpNode]:
+        target_node = None
+
+        for op_node in layer.op_nodes(include_directives=False):
+            if qubit in (qc.find_bit(q)[0] for q in op_node.qargs):
+                target_node = op_node
+                break
+
+        return target_node
+
+    def current_observation(self) -> Observation:
+        return self._circuit_to_obs(self.current_circuit)
+
+    def _generate_random_circuit(self) -> QuantumCircuit:
+        qc = QuantumCircuit(self.num_qubits)
+
+        while qc.depth() < self.max_depth:
+            try:
+                ic = self.rng.choice(self.instruction_callbacks)
+                ic(self.param_gen, qc, self.rng.integers(self.num_qubits))
+            except CircuitError:
+                pass
+
+        qc = transpile(qc, basis_gates=self.basis_gates)
+        qc.assign_parameters(self.rng.uniform(-pi, pi, qc.num_parameters), inplace=True)
+
+        return qc
+
+    def _parse_action(self, action: Action) -> Tuple[int, int, int]:
+        # noinspection PyTypeChecker
+        return np.unravel_index(
+            action,
+            shape=(self.max_depth, self.num_qubits, len(self.transformation_rules)),
+        )
+
+    def _reward(self, next_circuit: QuantumCircuit) -> float:
+        next_circuit = self.param_gen.parameterize_circuit(next_circuit)
+        _, next_cost = self.continuous_optimization(self.target_circuit, next_circuit)
+
+        depth_next = next_circuit.depth()
+        depth_current = self.current_circuit.depth()
+        depth_target = self.target_circuit.depth()
+
+        incremental_weight = 0.001
+        incremental_cost_diff = self.current_cost - next_cost
+        incremental_depth_diff = (depth_current - depth_next) / depth_target
+        incremental_reward = incremental_weight * (incremental_depth_diff + incremental_cost_diff)
+
+        depth_diff = (depth_target - depth_next) / depth_target
+        depth_exponent = 0.7
+        cost_exponent = 5.0
+        discovery_reward = max(depth_diff ** depth_exponent * next_cost ** cost_exponent, 0.0)
+
+        return incremental_reward + discovery_reward
 
     def _circuit_to_obs(self, qc: QuantumCircuit) -> Observation:
         if qc.depth() > self.max_depth:
             raise ValueError(f'Circuit depth must not exceed {self.max_depth}')
 
-        obs = np.zeros(self.observation_space.shape, dtype=self.observation_space.dtype)
+        orig_obs_shape = self.observation_space.spaces[1].shape
+        orig_obs = np.zeros(shape=orig_obs_shape)
         dag = circuit_to_dag(qc)
 
         for layer_idx, layer in enumerate(dag.layers()):
             for op_node in layer['graph'].op_nodes(include_directives=False):
-                qubit = qc.find_bit(op_node.qargs[0]).index
-                qubits = tuple(qc.find_bit(q).index for q in op_node.qargs)
+                instruction_idx, qubit = self.indices_from_op_node(qc, op_node)
+                orig_obs[layer_idx, qubit, instruction_idx] = 1
 
-                try:
-                    instruction_idx = index_with_key(
-                        self.instruction_callbacks,
-                        lambda c: c.equals_instruction(op_node.op, qubits, qubit)
-                    )
-                except ValueError as ex:
-                    raise ValueError('Circuit is incompatible with target instruction set') from ex
-
-                obs[layer_idx, qubit, instruction_idx] = 1
-
-        return obs
+        return self.action_mask(), orig_obs
 
     def _obs_to_circuit(self, obs: Observation) -> QuantumCircuit:
         qc = QuantumCircuit(self.u.num_qubits)
 
-        for layer in obs:
+        for layer in obs[1]:
             for first_qubit, instructions in enumerate(layer):
                 indices = np.flatnonzero(instructions)
                 if indices.size > 0:
@@ -140,11 +442,20 @@ class TransformationCircuitEnv(gym.Env):
 
 
 def main():
-    u = QuantumCircuit(2)
-    u.ch(0, 1)
-
     from qiskit.circuit.library import CXGate, SXGate, RZGate
     from qiskit.circuit import Parameter
+    from ray.rllib.algorithms.ppo import PPOConfig
+    from rich import print
+    from action_mask_model import TorchActionMaskModel
+
+    from gradient_based import gradient_based_hst_weighted
+
+    u = QuantumCircuit(2)
+    u.cz(0, 1)
+    u = transpile(u, basis_gates=['cx', 'sx', 'rz'])
+
+    max_depth = 8
+    num_qubits = 2
 
     sx = SXGate()
     rz = RZGate(Parameter('x'))
@@ -157,8 +468,60 @@ def main():
         InstructionCallback(cx, nn_qubit_callback_reversed),
     ]
 
-    # TODO: transformation callbacks
-    env = TransformationCircuitEnv.from_args(u, 6, instruction_callbacks, [])
+    transformation_rules = [SwapInstructions, ShiftQubitUp, ShiftQubitDown, RemoveInstruction]
+
+    config = (
+        PPOConfig()
+        .training(
+            model={
+                'custom_model': TorchActionMaskModel,
+            },
+            train_batch_size=32,
+            sgd_minibatch_size=4,
+        )
+        .debugging(log_level='ERROR')
+        .environment(
+            TransformationCircuitEnv,
+            env_config={
+                'max_depth': max_depth,
+                'num_qubits': num_qubits,
+                'instruction_callbacks': instruction_callbacks,
+                'transformation_rules': transformation_rules,
+                'continuous_optimization': gradient_based_hst_weighted,
+            },
+            disable_env_checking=True,
+        )
+        .fault_tolerance(
+            recreate_failed_workers=True,
+            restart_failed_sub_environments=True,
+        )
+        .framework('torch')
+        .rollouts(
+            num_rollout_workers=2,
+        )
+    )
+
+    algo = config.build()
+    # algo.restore('tce/checkpoints/checkpoint_000091')
+
+    for i in range(10):
+        algo.train()
+        if i % 10 == 0:
+            checkpoint_dir = algo.save('tce/checkpoints')
+            print(f'Iteration {i}: saved checkpoint in {checkpoint_dir}')
+
+    env = TransformationCircuitEnv.from_args(max_depth, num_qubits, instruction_callbacks, transformation_rules,
+                                             gradient_based_hst_weighted, u)
+    obs, _ = env.reset()
+    terminated = False
+
+    while not terminated:
+        action = algo.compute_single_action(obs, explore=False)
+        obs, reward, terminated, *_ = env.step(action)
+        print(f'Epoch {env.epoch}: {reward}')
+
+    print(env.current_circuit)
+    print(env.current_cost)
 
 
 if __name__ == '__main__':

@@ -5,7 +5,7 @@ import random
 
 from enum import auto, Enum
 from math import exp, pi
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, Optional
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter, CircuitInstruction, Instruction
@@ -48,13 +48,14 @@ class SimulatedAnnealing:
         min_instructions: int = 0,
         tolerance: float = 1e-2,
         initial_temperature: float = 0.2,
-        beta: float = 1.5,
+        beta: Optional[float] = 1.5,
     ):
         assert max_iterations > 0
         assert max_instructions >= min_instructions >= 0
         assert tolerance > 0.0
         assert initial_temperature > 0.0
-        assert beta > 0.0
+        if beta is not None:
+            assert beta > 0.0
 
         self.u = u
         self.native_instructions = native_instructions
@@ -285,7 +286,8 @@ class SimulatedAnnealing:
                 progress.update(1)
 
             # Annealing schedule
-            self.temperature = self.initial_temperature * pow(1.0 - i / self.max_iterations, self.beta)
+            if self.beta is not None:
+                self.temperature = self.initial_temperature * pow(1.0 - i / self.max_iterations, self.beta)
 
         return self.best_v, self.best_params, self.best_cost
 
