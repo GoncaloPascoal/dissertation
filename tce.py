@@ -6,8 +6,8 @@ from math import pi
 from typing import Any, Dict, List, Optional, Tuple
 
 import gymnasium as gym
-import numpy as np
 from gymnasium import spaces
+import numpy as np
 from qiskit import QuantumCircuit, transpile
 from qiskit.circuit import Instruction, ParameterExpression
 from qiskit.circuit.exceptions import CircuitError
@@ -18,7 +18,7 @@ from parameter_generator import ParameterGenerator
 from utils import ContinuousOptimizationFunction, index_with_key
 
 
-Observation = Tuple[np.ndarray, np.ndarray]
+Observation = np.ndarray
 Action = int
 
 
@@ -319,16 +319,18 @@ class TransformationCircuitEnv(gym.Env):
         self.basis_gates = [callback.instruction.name for callback in self.instruction_callbacks]
 
         num_actions = self.max_depth * self.num_qubits * len(self.transformation_rules)
-        # Use Box for observations instead of MultiBinary due to bugs with RLlib
-        self.observation_space: spaces.Tuple = spaces.Tuple((
-            spaces.Box(0.0, 1.0, shape=(num_actions,)),
-            spaces.Box(0, 1, shape=(self.max_depth, self.num_qubits, len(self.instruction_callbacks))),
-        ))
+        self.observation_space: spaces.MultiBinary = spaces.MultiBinary(
+            (self.max_depth, self.num_qubits, len(self.instruction_callbacks)),
+        )
         self.action_space: spaces.Discrete = spaces.Discrete(num_actions)
         self.valid_actions: np.ndarray = np.zeros(num_actions)
 
         self.current_circuit = QuantumCircuit(self.num_qubits)
-        self.current_cost = 1.0
+        self.current_cost = 0.0
+
+        self.best_circuit = QuantumCircuit(self.num_qubits)
+        self.best_reward = 0.0
+
         self.target_circuit = QuantumCircuit(self.num_qubits)
         self.epoch = 0
 
@@ -352,26 +354,26 @@ class TransformationCircuitEnv(gym.Env):
         })
 
     def step(self, action: Action) -> Tuple[Observation, float, bool, bool, Dict[str, Any]]:
+        layer, qubit, rule = self._parse_action(action)
         if not self.valid_actions[action]:
-            layer, qubit, rule = self._parse_action(action)
             rule_type = self.transformation_rules[rule].__class__.__name__
             raise ValueError(f'An invalid action was selected: {rule_type} on layer {layer} and qubit {qubit}')
 
-        layer, qubit, rule = np.unravel_index(
-            action,
-            shape=(self.max_depth, self.num_qubits, len(self.transformation_rules)),
-        )
-
         next_circuit = self.transformation_rules[rule].perform(self, layer, qubit)
+        next_params, next_cost = self.continuous_optimization(self.target_circuit, next_circuit)
+        next_circuit.assign_parameters(next_params, inplace=True)
+        next_circuit = transpile(next_circuit, basis_gates=self.basis_gates)
 
-        self.current_circuit = next_circuit
+        reward = self._reward(next_circuit, next_cost)
+
+        self.current_circuit = self.param_gen.parameterize_circuit(next_circuit)
+        self.current_cost = next_cost
+
         self.epoch += 1
-
-        reward = self._reward(next_circuit)
         terminated = self.epoch == 32
 
         obs = self.current_observation()
-        self.valid_actions = obs[0]
+        self.valid_actions = self.action_masks()
 
         return obs, reward, terminated, False, {}
 
@@ -386,21 +388,21 @@ class TransformationCircuitEnv(gym.Env):
         self.target_circuit = self.current_circuit.copy()
         self.epoch = 0
 
-        self.current_cost = 0.0
         self.current_circuit = self.param_gen.parameterize_circuit(self.current_circuit)
+        self.current_cost = 0.0
 
         obs = self.current_observation()
-        self.valid_actions = obs[0]
+        self.valid_actions = self.action_masks()
 
         return obs, {}
 
-    def action_mask(self) -> np.ndarray:
+    def action_masks(self) -> np.ndarray:
         actions = [self._parse_action(a) for a in range(self.action_space.n)]
 
         return np.array([
             self.transformation_rules[rule].is_valid(self, layer, qubit)
             for layer, qubit, rule in actions
-        ], dtype=self.observation_space.spaces[0].dtype)
+        ])
 
     def indices_from_op_node(self, qc: QuantumCircuit, op_node: DAGOpNode) -> Tuple[int, int]:
         """
@@ -436,6 +438,10 @@ class TransformationCircuitEnv(gym.Env):
     def current_observation(self) -> Observation:
         return self._circuit_to_obs(self.current_circuit)
 
+    def describe_action(self, action: int) -> str:
+        layer, qubit, rule = self._parse_action(action)
+        return f'{self.transformation_rules[rule].__class__.__name__} on layer {layer} and qubit {qubit}'
+
     def _generate_random_circuit(self) -> QuantumCircuit:
         qc = QuantumCircuit(self.num_qubits)
 
@@ -458,9 +464,7 @@ class TransformationCircuitEnv(gym.Env):
             shape=(self.max_depth, self.num_qubits, len(self.transformation_rules)),
         )
 
-    def _reward(self, next_circuit: QuantumCircuit) -> float:
-        _, next_cost = self.continuous_optimization(self.target_circuit, next_circuit)
-
+    def _reward(self, next_circuit: QuantumCircuit, next_cost: float) -> float:
         depth_next = next_circuit.depth()
         depth_current = self.current_circuit.depth()
         depth_target = self.target_circuit.depth()
@@ -471,13 +475,16 @@ class TransformationCircuitEnv(gym.Env):
         incremental_reward = incremental_weight * (incremental_depth_diff + incremental_cost_diff)
 
         depth_diff = (depth_target - depth_next) / depth_target
-        depth_exponent = 0.7
+        depth_exponent = 0.5
         cost_exponent = 5.0
 
         if depth_diff > 0.0:
-            discovery_reward = depth_diff ** depth_exponent * next_cost ** cost_exponent
+            discovery_reward = depth_diff ** depth_exponent * (1 - next_cost) ** cost_exponent
         else:
             discovery_reward = 0.0
+
+        if discovery_reward > self.best_reward:
+            self.best_circuit, self.best_reward = next_circuit.copy(), discovery_reward
 
         return incremental_reward + discovery_reward
 
@@ -485,16 +492,15 @@ class TransformationCircuitEnv(gym.Env):
         if qc.depth() > self.max_depth:
             raise ValueError(f'Circuit depth must not exceed {self.max_depth}')
 
-        orig_obs = self.observation_space.spaces[1]
-        orig_obs = np.zeros(shape=orig_obs.shape, dtype=orig_obs.dtype)
+        obs = np.zeros(shape=self.observation_space.shape, dtype=self.observation_space.dtype)
         dag = circuit_to_dag(qc)
 
         for layer_idx, layer in enumerate(dag.layers()):
             for op_node in layer['graph'].op_nodes(include_directives=False):
                 instruction_idx, qubit = self.indices_from_op_node(qc, op_node)
-                orig_obs[layer_idx, qubit, instruction_idx] = 1
+                obs[layer_idx, qubit, instruction_idx] = 1
 
-        return self.action_mask(), orig_obs
+        return obs
 
     def _obs_to_circuit(self, obs: Observation) -> QuantumCircuit:
         qc = QuantumCircuit(self.u.num_qubits)
