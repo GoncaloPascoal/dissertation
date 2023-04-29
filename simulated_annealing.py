@@ -74,13 +74,13 @@ class SimulatedAnnealing:
         self.initial_temperature = initial_temperature
         self.beta = beta
 
+        self.param_gen = ParameterGenerator()
+
         self.v = self._generate_random_circuit(u.num_qubits, max_instructions)
         self.best_v = self.v
         self.best_params, self.best_cost = self.continuous_optimization(self.v)
         self.current_cost = self.best_cost
         self.temperature = initial_temperature
-
-        self.param_gen = ParameterGenerator()
 
         self._logger.info(f'Initial circuit has cost {self.best_cost:.4f}')
 
