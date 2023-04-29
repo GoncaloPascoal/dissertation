@@ -1,5 +1,6 @@
 
 from qiskit import QuantumCircuit, transpile
+from qiskit.transpiler import CouplingMap
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 
@@ -18,10 +19,12 @@ def main():
 
     # Nearest neighbor coupling
     coupling_map = [(q, q + 1) for q in range(num_qubits - 1)]
+    coupling_map_qiskit = CouplingMap.from_line(num_qubits)
 
     u = QuantumCircuit(3)
-    u.toffoli(0, 1, 2)
-    u = transpile(u, basis_gates=['cx', 'sx', 'rz'], coupling_map=[list(pair) for pair in coupling_map],
+    u.cx(1, 0)
+    u.cx(1, 2)
+    u = transpile(u, basis_gates=['cx', 'sx', 'rz'], coupling_map=coupling_map_qiskit,
                   approximation_degree=0.0, seed_transpiler=1)
     print(u)
     print(u.depth())
@@ -61,11 +64,15 @@ def main():
     total_reward = 0.0
     while not terminated:
         action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=False)
+        action = int(action)
+
+        print(env.format_action(action))
+
         obs, reward, terminated, *_ = env.step(action)
         total_reward += reward
 
     print(env.current_circuit)
-    print(env.current_circuit.depth())
+    print(f'Depth: {env.current_circuit.depth()}')
     print(f'{total_reward = }')
 
 

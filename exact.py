@@ -37,23 +37,24 @@ class InvertCnot(TransformationRule):
 
             for op_node in dag_layer:
                 new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
-                if i == layer:
-                    new_dag.apply_operation_back(hadamard, cx_op_node.qargs[:1])
-                    new_dag.apply_operation_back(hadamard, cx_op_node.qargs[1:])
 
-                    new_dag.apply_operation_back(cx_op_node.op, cx_op_node.qargs[::-1])
+            if i == layer:
+                new_dag.apply_operation_back(hadamard, cx_op_node.qargs[:1])
+                new_dag.apply_operation_back(hadamard, cx_op_node.qargs[1:])
 
-                    new_dag.apply_operation_back(hadamard, cx_op_node.qargs[:1])
-                    new_dag.apply_operation_back(hadamard, cx_op_node.qargs[1:])
+                new_dag.apply_operation_back(cx_op_node.op, cx_op_node.qargs[::-1])
+
+                new_dag.apply_operation_back(hadamard, cx_op_node.qargs[:1])
+                new_dag.apply_operation_back(hadamard, cx_op_node.qargs[1:])
 
         return dag_to_circuit(new_dag)
 
 
 class CommuteGates(TransformationRule):
-    def is_valid(self, env: 'TransformationCircuitEnv', layer: int, q: int) -> bool:
+    def is_valid(self, env: 'TransformationCircuitEnv', layer: int, qubit: int) -> bool:
         qc = env.current_circuit
         dag = circuit_to_dag(qc)
-        op_node_a, op_node_b = op_node_at(dag, layer, q), op_node_at(dag, layer + 1, q)
+        op_node_a, op_node_b = op_node_at(dag, layer, qubit), op_node_at(dag, layer + 1, qubit)
 
         if op_node_a is None or op_node_b is None:
             # Gates must exist at the given location
@@ -82,6 +83,7 @@ class CommuteGates(TransformationRule):
                 depth_increase += 1
 
             if env.current_circuit.depth() + depth_increase > env.max_depth:
+                # Disallow transformation if it would cause the circuit to exceed the maximum depth
                 return False
 
         op_a: Gate = op_node_a.op
@@ -97,16 +99,16 @@ class CommuteGates(TransformationRule):
 
             if isinstance(op_node_other.op, SXGate):
                 # X rotations (such as Sqrt-X) commute with CNOTs at the target qubit
-                return q == cx_target
+                return qubit == cx_target
             elif isinstance(op_node_other.op, RZGate):
                 # Z rotations commute with CNOTs at the control qubit
-                return q == cx_control
+                return qubit == cx_control
 
         if isinstance(op_a, RZGate) and isinstance(op_b, RZGate):
             # Rz gates with different parameters commute
             return True
 
-        if isinstance(op_a, CXGate) and isinstance(op_b, RZGate):
+        if isinstance(op_a, CXGate) and isinstance(op_b, CXGate):
             # CNOT gates commute if they share a control or target qubit
             return qubits_a[0] == qubits_b[0] or qubits_a[1] == qubits_b[1]
 

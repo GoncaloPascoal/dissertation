@@ -116,6 +116,13 @@ class TransformationCircuitEnv(gym.Env, ABC):
             action, shape=(self.max_depth, self.num_qubits, len(self.transformation_rules))
         ))
 
+    def format_action(self, action: ActType | DecodedAction) -> str:
+        if isinstance(action, TransformationCircuitEnv.ActType):
+            action = self.decode_action(action)
+        rule_type = self.transformation_rules[action.rule]
+
+        return f'{rule_type.__class__.__name__} (layer {action.layer}, qubit {action.qubit})'
+
     def circuit_to_obs(self, qc: QuantumCircuit) -> NDArray[Literal['*, *, *'], Int8]:
         """
         Converts the given ``QuantumCircuit`` to an equivalent observation based on the environment configuration.
