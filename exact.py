@@ -1,14 +1,17 @@
+from typing import List, Tuple
+
 from qiskit import QuantumCircuit
 from qiskit.circuit import Gate
-from qiskit.circuit.library import CXGate, HGate, RZGate, SXGate
+from qiskit.circuit.library import CXGate, HGate, RXGate, RZGate, SXGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
+from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 
 from tce import TransformationCircuitEnv, TransformationRule
 from dag_utils import dag_layers, op_node_at
 
 
 class InvertCnot(TransformationRule):
-    def is_valid(self, env: 'TransformationCircuitEnv', layer: int, qubit: int) -> bool:
+    def is_valid(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> bool:
         qc = env.current_circuit
         dag = circuit_to_dag(qc)
         op_node = op_node_at(dag, layer, qubit)
@@ -23,7 +26,7 @@ class InvertCnot(TransformationRule):
 
         return True
 
-    def apply(self, env: 'TransformationCircuitEnv', layer: int, qubit: int) -> QuantumCircuit:
+    def apply(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> QuantumCircuit:
         qc = env.current_circuit
         dag = circuit_to_dag(qc)
         cx_op_node = op_node_at(dag, layer, qubit)
@@ -51,7 +54,7 @@ class InvertCnot(TransformationRule):
 
 
 class CommuteGates(TransformationRule):
-    def is_valid(self, env: 'TransformationCircuitEnv', layer: int, qubit: int) -> bool:
+    def is_valid(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> bool:
         qc = env.current_circuit
         dag = circuit_to_dag(qc)
         op_node_a, op_node_b = op_node_at(dag, layer, qubit), op_node_at(dag, layer + 1, qubit)
@@ -97,7 +100,7 @@ class CommuteGates(TransformationRule):
 
             cx_control, cx_target = [dag.qubits.index(q) for q in op_node_cx.qargs]
 
-            if isinstance(op_node_other.op, SXGate):
+            if isinstance(op_node_other.op, (SXGate, RXGate)):
                 # X rotations (such as Sqrt-X) commute with CNOTs at the target qubit
                 return qubit == cx_target
             elif isinstance(op_node_other.op, RZGate):
@@ -114,7 +117,7 @@ class CommuteGates(TransformationRule):
 
         return False
 
-    def apply(self, env: 'TransformationCircuitEnv', layer: int, qubit: int) -> QuantumCircuit:
+    def apply(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> QuantumCircuit:
         qc = env.current_circuit
         dag = circuit_to_dag(qc)
         op_node_a, op_node_b = op_node_at(dag, layer, qubit), op_node_at(dag, layer + 1, qubit)
@@ -135,8 +138,124 @@ class CommuteGates(TransformationRule):
         return dag_to_circuit(new_dag)
 
 
+class CommuteRzBetweenCnots(TransformationRule):
+    @staticmethod
+    def _assign_op_nodes(
+        op_nodes: List[DAGOpNode],
+        reverse: bool,
+    ) -> Tuple[DAGOpNode, DAGOpNode, DAGOpNode, DAGOpNode]:
+        if reverse:
+            cx_c, cx_a, rz, cx_b = op_nodes
+        else:
+            cx_a, rz, cx_b, cx_c = op_nodes
+
+        return cx_a, rz, cx_b, cx_c
+
+    @staticmethod
+    def _assign_layer_indices(
+        layer: int,
+        reverse: bool,
+    ) -> Tuple[int, int, int, int]:
+        if reverse:
+            return layer + 1, layer + 2, layer + 3, layer
+        else:
+            return tuple(range(layer, layer + 4))
+
+    @staticmethod
+    def _check_gates(dag: DAGCircuit, op_nodes: List[DAGOpNode], qubit: int, reverse: bool) -> bool:
+        cx_a, rz, cx_b, cx_c = CommuteRzBetweenCnots._assign_op_nodes(op_nodes, reverse)
+
+        cx_a_qubits, cx_b_qubits, cx_c_qubits = (
+            tuple(dag.qubits.index(q) for q in n.qargs)
+            for n in (cx_a, cx_b, cx_c)
+        )
+
+        ctrl_a, target_a = cx_a_qubits
+        ctrl_c, target_c = cx_c_qubits
+
+        return not (
+            isinstance(cx_a.op, CXGate) and target_a == qubit and
+            isinstance(cx_b.op, CXGate) and cx_b_qubits == cx_a_qubits and
+            isinstance(rz, RZGate) and
+            isinstance(cx_c, CXGate) and ctrl_c == target_a and target_c != ctrl_a
+        )
+
+    @staticmethod
+    def _check_layers(
+        env: TransformationCircuitEnv,
+        dag: DAGCircuit,
+        layer: int,
+        qubit: int,
+        reverse: bool
+    ) -> bool:
+        layer_cx_a, layer_rz, layer_cx_b, layer_cx_c = CommuteRzBetweenCnots._assign_layer_indices(layer, reverse)
+
+        cx_a, cx_c = (op_node_at(dag, l, qubit) for l in (layer_cx_a, layer_cx_c))
+        cx_a_qubits, cx_c_qubits = (
+            tuple(dag.qubits.index(q) for q in n.qargs)
+            for n in (cx_a, cx_c)
+        )
+
+        ctrl_a = cx_a_qubits[0]
+        target_c = cx_c_qubits[1]
+
+        if op_node_at(dag, layer_rz, ctrl_a) is not None:
+            return False
+
+        depth_increase = 0
+
+        for l in (layer_cx_a, layer_rz, layer_cx_b):
+            if op_node_at(dag, l, target_c) is not None:
+                depth_increase += 1
+
+        if op_node_at(dag, layer_cx_c, ctrl_a) is not None:
+            depth_increase += 1
+
+        return env.current_circuit.depth() + depth_increase <= env.max_depth
+
+    @staticmethod
+    def _is_reverse(dag: DAGCircuit, layer: int, qubit: int) -> bool:
+        return isinstance(op_node_at(dag, layer + 1, qubit), CXGate)
+
+    def is_valid(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> bool:
+        qc = env.current_circuit
+        dag = circuit_to_dag(qc)
+        op_nodes = [op_node_at(dag, l, qubit) for l in range(layer, layer + 4)]
+
+        if any(n is None for n in op_nodes):
+            return False
+
+        reverse = self._is_reverse(dag, layer, qubit)
+
+        return (
+            CommuteRzBetweenCnots._check_gates(dag, op_nodes, qubit, reverse) and
+            CommuteRzBetweenCnots._check_layers(env, dag, layer, qubit, reverse)
+        )
+
+    def apply(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> QuantumCircuit:
+        qc = env.current_circuit
+        dag = circuit_to_dag(qc)
+        op_nodes = [op_node_at(dag, l, qubit) for l in range(layer, layer + 4)]
+
+        reverse = self._is_reverse(dag, layer, qubit)
+        cx_a, rz, cx_b, cx_c = CommuteRzBetweenCnots._assign_op_nodes(op_nodes, reverse)
+        layer_cx_a, layer_rz, layer_cx_b, layer_cx_c = CommuteRzBetweenCnots._assign_layer_indices(layer, reverse)
+
+        new_dag = dag.copy_empty_like()
+
+        for i, dag_layer in enumerate(dag_layers(dag)):
+            if i < layer or i >= layer + 4:
+                for op_node in dag_layer:
+                    new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
+            else:
+                # TODO: implement swap
+                pass
+
+        return dag_to_circuit(new_dag)
+
+
 class CollapseFourAlternatingCnots(TransformationRule):
-    def is_valid(self, env: 'TransformationCircuitEnv', layer: int, qubit: int) -> bool:
+    def is_valid(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> bool:
         qc = env.current_circuit
         dag = circuit_to_dag(qc)
         op_nodes = [op_node_at(dag, layer + i, qubit) for i in range(4)]
@@ -148,7 +267,7 @@ class CollapseFourAlternatingCnots(TransformationRule):
 
         return all(q_b == q_a[::-1] for q_a, q_b in zip(qargs, qargs[1:]))
 
-    def apply(self, env: 'TransformationCircuitEnv', layer: int, qubit: int) -> QuantumCircuit:
+    def apply(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> QuantumCircuit:
         qc = env.current_circuit
         dag = circuit_to_dag(qc)
         op_nodes = [op_node_at(dag, layer + i, qubit) for i in range(4)]
