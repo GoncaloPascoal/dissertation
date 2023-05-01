@@ -287,10 +287,9 @@ class CollapseFourAlternatingCnots(TransformationRule):
     def apply(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> QuantumCircuit:
         qc = env.current_circuit
         dag = circuit_to_dag(qc)
-        op_nodes = [op_node_at(dag, layer + i, qubit) for i in range(4)]
 
-        new_dag = dag.copy_empty_like()
+        to_remove = [op_node_at(dag, layer, qubit), op_node_at(dag, layer + 3, qubit)]
+        for op_node in to_remove:
+            dag.remove_op_node(op_node)
 
-        # TODO: implement transformation
-
-        return dag_to_circuit(new_dag)
+        return dag_to_circuit(dag)
