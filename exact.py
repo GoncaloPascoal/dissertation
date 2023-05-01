@@ -170,15 +170,16 @@ class CommuteRzBetweenCnots(TransformationRule):
             for n in (cx_a, cx_b, cx_c)
         )
 
+        if not (
+            isinstance(cx_a.op, CXGate) and isinstance(cx_b.op, CXGate) and
+            isinstance(rz.op, RZGate) and isinstance(cx_c.op, CXGate)
+        ):
+            return False
+
         ctrl_a, target_a = cx_a_qubits
         ctrl_c, target_c = cx_c_qubits
 
-        return not (
-            isinstance(cx_a.op, CXGate) and target_a == qubit and
-            isinstance(cx_b.op, CXGate) and cx_b_qubits == cx_a_qubits and
-            isinstance(rz, RZGate) and
-            isinstance(cx_c, CXGate) and ctrl_c == target_a and target_c != ctrl_a
-        )
+        return target_a == qubit and cx_b_qubits == cx_a_qubits and ctrl_c == target_a and target_c != ctrl_a
 
     @staticmethod
     def _check_layers(
@@ -199,7 +200,8 @@ class CommuteRzBetweenCnots(TransformationRule):
         ctrl_a = cx_a_qubits[0]
         target_c = cx_c_qubits[1]
 
-        if op_node_at(dag, layer_rz, ctrl_a) is not None:
+        op_node = op_node_at(dag, layer_rz, ctrl_a)
+        if not (op_node is None or isinstance(op_node.op, RZGate)):
             return False
 
         depth_increase = 0
@@ -248,8 +250,23 @@ class CommuteRzBetweenCnots(TransformationRule):
                 for op_node in dag_layer:
                     new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
             else:
-                # TODO: implement swap
-                pass
+                if i in {layer_cx_a, layer_rz, layer_cx_b}:
+                    for op_node in dag_layer:
+                        if op_node not in {cx_a, rz, cx_b}:
+                            new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
+
+                    if i == layer_cx_b:
+                        ops = [cx_a, rz, cx_b] if reverse else [cx_c]
+                        for op_node in ops:
+                            new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
+                else:
+                    ops = [cx_c] if reverse else [cx_a, rz, cx_b]
+                    for op_node in ops:
+                        new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
+
+                    for op_node in dag_layer:
+                        if op_node != cx_c:
+                            new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
 
         return dag_to_circuit(new_dag)
 

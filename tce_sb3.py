@@ -5,7 +5,7 @@ from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 
 from tce import ExactTransformationCircuitEnv
-from exact import CommuteGates, InvertCnot
+from exact import CommuteGates, InvertCnot, CommuteRzBetweenCnots
 from gate_class import GateClass, generate_two_qubit_gate_classes_from_coupling_map
 
 
@@ -22,8 +22,7 @@ def main():
     coupling_map_qiskit = CouplingMap.from_line(num_qubits)
 
     u = QuantumCircuit(3)
-    u.cx(1, 0)
-    u.cx(1, 2)
+    u.toffoli(0, 1, 2)
     u = transpile(u, basis_gates=['cx', 'sx', 'rz'], coupling_map=coupling_map_qiskit,
                   approximation_degree=0.0, seed_transpiler=1)
     print(u)
@@ -40,6 +39,7 @@ def main():
 
     transformation_rules = [
         CommuteGates(),
+        CommuteRzBetweenCnots(),
         InvertCnot(),
     ]
 

@@ -68,7 +68,8 @@ class TransformationCircuitEnv(gym.Env, ABC):
         if not self.valid_actions[action]:
             layer, qubit, rule = decoded
             rule_type = self.transformation_rules[rule]
-            raise ValueError(f'Invalid action selected: {rule_type} on layer {layer}, qubit {qubit}')
+            raise ValueError(f'Invalid action selected: {rule_type.__class__.__name__} on layer {layer},'
+                             f'qubit {qubit}')
 
         self.next_circuit = transpile(
             self.generate_next_circuit(decoded),
