@@ -3,9 +3,10 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.transpiler import CouplingMap
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+from stable_baselines3.common.vec_env import SubprocVecEnv
 
 from tce import ExactTransformationCircuitEnv
-from exact import CommuteGates, InvertCnot, CommuteRzBetweenCnots
+from exact import CollapseFourAlternatingCnots, CommuteGates, InvertCnot, CommuteRzBetweenCnots
 from gate_class import GateClass, generate_two_qubit_gate_classes_from_coupling_map
 
 
@@ -25,8 +26,9 @@ def main():
     u.toffoli(0, 1, 2)
     u = transpile(u, basis_gates=['cx', 'sx', 'rz'], coupling_map=coupling_map_qiskit,
                   approximation_degree=0.0, seed_transpiler=1)
+
     print(u)
-    print(u.depth())
+    print(f'[bold]Target unitary depth:[/bold] {u.depth()}')
 
     rz = RZGate(Parameter('x'))
     sx = SXGate()
@@ -40,10 +42,13 @@ def main():
     transformation_rules = [
         CommuteGates(),
         CommuteRzBetweenCnots(),
+        CollapseFourAlternatingCnots(),
         InvertCnot(),
     ]
 
-    env = ExactTransformationCircuitEnv(max_depth, num_qubits, gate_classes, transformation_rules)
+    def env_fn() -> ExactTransformationCircuitEnv:
+        return ExactTransformationCircuitEnv(max_depth, num_qubits, gate_classes, transformation_rules)
+    env = SubprocVecEnv([env_fn] * 4)
 
     try:
         model = MaskablePPO.load('tce_sb3_ppo.model', env)
@@ -53,9 +58,10 @@ def main():
 
     learn = False
     if learn:
-        model.learn(4096, progress_bar=True)
+        model.learn(16000, progress_bar=True)
         model.save('tce_sb3_ppo.model')
 
+    env = env_fn()
     env.target_circuit = u
     env.max_time_steps = 128
     obs, _ = env.reset()
@@ -63,7 +69,7 @@ def main():
 
     total_reward = 0.0
     while not terminated:
-        action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=False)
+        action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=True)
         action = int(action)
 
         print(env.format_action(action))
@@ -72,8 +78,8 @@ def main():
         total_reward += reward
 
     print(env.current_circuit)
-    print(f'Depth: {env.current_circuit.depth()}')
-    print(f'{total_reward = }')
+    print(f'[bold]Optimized depth[/bold] {env.current_circuit.depth()}')
+    print(f'[bold]Total reward:[/bold] {total_reward}')
 
 
 if __name__ == '__main__':

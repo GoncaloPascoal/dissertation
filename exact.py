@@ -3,7 +3,7 @@ from typing import List, Tuple
 from qiskit import QuantumCircuit
 from qiskit.circuit import Gate
 from qiskit.circuit.library import CXGate, HGate, RXGate, RZGate, SXGate
-from qiskit.converters import circuit_to_dag, dag_to_circuit
+from qiskit.converters import dag_to_circuit
 from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 
 from tce import TransformationCircuitEnv, TransformationRule
@@ -13,7 +13,7 @@ from dag_utils import dag_layers, op_node_at
 class InvertCnot(TransformationRule):
     def is_valid(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> bool:
         qc = env.current_circuit
-        dag = circuit_to_dag(qc)
+        dag = env.current_dag
         op_node = op_node_at(dag, layer, qubit)
 
         if op_node is None or not isinstance(op_node.op, CXGate):
@@ -24,11 +24,10 @@ class InvertCnot(TransformationRule):
         if first_qubit != qubit:
             return False
 
-        return True
+        return qc.depth() + 6 <= env.max_depth
 
     def apply(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> QuantumCircuit:
-        qc = env.current_circuit
-        dag = circuit_to_dag(qc)
+        dag = env.current_dag
         cx_op_node = op_node_at(dag, layer, qubit)
 
         new_dag = dag.copy_empty_like()
@@ -55,8 +54,7 @@ class InvertCnot(TransformationRule):
 
 class CommuteGates(TransformationRule):
     def is_valid(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> bool:
-        qc = env.current_circuit
-        dag = circuit_to_dag(qc)
+        dag = env.current_dag
         op_node_a, op_node_b = op_node_at(dag, layer, qubit), op_node_at(dag, layer + 1, qubit)
 
         if op_node_a is None or op_node_b is None:
@@ -118,8 +116,7 @@ class CommuteGates(TransformationRule):
         return False
 
     def apply(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> QuantumCircuit:
-        qc = env.current_circuit
-        dag = circuit_to_dag(qc)
+        dag = env.current_dag
         op_node_a, op_node_b = op_node_at(dag, layer, qubit), op_node_at(dag, layer + 1, qubit)
 
         new_dag = dag.copy_empty_like()
@@ -220,8 +217,7 @@ class CommuteRzBetweenCnots(TransformationRule):
         return isinstance(op_node_at(dag, layer + 1, qubit), CXGate)
 
     def is_valid(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> bool:
-        qc = env.current_circuit
-        dag = circuit_to_dag(qc)
+        dag = env.current_dag
         op_nodes = [op_node_at(dag, l, qubit) for l in range(layer, layer + 4)]
 
         if any(n is None for n in op_nodes):
@@ -235,8 +231,7 @@ class CommuteRzBetweenCnots(TransformationRule):
         )
 
     def apply(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> QuantumCircuit:
-        qc = env.current_circuit
-        dag = circuit_to_dag(qc)
+        dag = env.current_dag
         op_nodes = [op_node_at(dag, l, qubit) for l in range(layer, layer + 4)]
 
         reverse = self._is_reverse(dag, layer, qubit)
@@ -273,8 +268,7 @@ class CommuteRzBetweenCnots(TransformationRule):
 
 class CollapseFourAlternatingCnots(TransformationRule):
     def is_valid(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> bool:
-        qc = env.current_circuit
-        dag = circuit_to_dag(qc)
+        dag = env.current_dag
         op_nodes = [op_node_at(dag, layer + i, qubit) for i in range(4)]
 
         if any(n is None or not isinstance(n.op, CXGate) for n in op_nodes):
@@ -285,8 +279,7 @@ class CollapseFourAlternatingCnots(TransformationRule):
         return all(q_b == q_a[::-1] for q_a, q_b in zip(qargs, qargs[1:]))
 
     def apply(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> QuantumCircuit:
-        qc = env.current_circuit
-        dag = circuit_to_dag(qc)
+        dag = env.current_dag
 
         to_remove = [op_node_at(dag, layer, qubit), op_node_at(dag, layer + 3, qubit)]
         for op_node in to_remove:

@@ -56,6 +56,7 @@ class TransformationCircuitEnv(gym.Env, ABC):
         self.max_time_steps = max_time_steps
 
         self.current_circuit = QuantumCircuit(num_qubits)
+        self.current_dag = circuit_to_dag(self.current_circuit)
         self.next_circuit = QuantumCircuit(num_qubits)
 
         self.basis_gates = list({gc.gate.name for gc in self.gate_classes})
@@ -71,15 +72,12 @@ class TransformationCircuitEnv(gym.Env, ABC):
             raise ValueError(f'Invalid action selected: {rule_type.__class__.__name__} on layer {layer},'
                              f'qubit {qubit}')
 
-        self.next_circuit = transpile(
-            self.generate_next_circuit(decoded),
-            approximation_degree=0.0,
-            basis_gates=self.basis_gates,
-        )
+        self.next_circuit = self.generate_next_circuit(decoded)
 
         reward = self.reward()
 
         self.current_circuit = self.next_circuit
+        self.current_dag = circuit_to_dag(self.current_circuit)
         self._set_valid_actions()
 
         self.time_step += 1
@@ -133,7 +131,6 @@ class TransformationCircuitEnv(gym.Env, ABC):
         """
 
         if qc.depth() > self.max_depth:
-            print(qc)
             raise ValueError(f'Circuit depth must not exceed {self.max_depth}')
 
         if qc.num_qubits > self.num_qubits:
@@ -167,7 +164,6 @@ class TransformationCircuitEnv(gym.Env, ABC):
                 lambda c: c.equals_gate(qubit, op_node.op, qubits)
             )
         except ValueError as ex:
-            print(op_node.op, qubits)
             raise ValueError('Circuit is incompatible with target gate set') from ex
 
         return qubit, gate_idx
@@ -235,15 +231,21 @@ class ExactTransformationCircuitEnv(TransformationCircuitEnv):
 
     def generate_next_circuit(self, decoded_action: TransformationCircuitEnv.DecodedAction) -> QuantumCircuit:
         rule = self.transformation_rules[decoded_action.rule]
-        return rule.apply(self, decoded_action.layer, decoded_action.qubit)
+        return transpile(
+            rule.apply(self, decoded_action.layer, decoded_action.qubit),
+            approximation_degree=0.0,
+            basis_gates=self.basis_gates,
+        )
 
     def reset_circuits(self):
         if self.target_circuit:
             self.current_circuit = self.target_circuit.copy()
+            self.current_dag = circuit_to_dag(self.current_circuit)
             self._set_valid_actions()
         else:
             while True:
                 self.current_circuit = self._generate_random_circuit()
+                self.current_dag = circuit_to_dag(self.current_circuit)
                 self._set_valid_actions()
                 if self.valid_actions.any():
                     break
