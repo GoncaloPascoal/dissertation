@@ -133,15 +133,13 @@ class TransformationCircuitEnv(gym.Env, ABC):
         if qc.num_qubits > self.num_qubits:
             raise ValueError(f'Circuit qubit count must not exceed {self.num_qubits}')
 
-        circuit_obs_shape = (self.max_depth, self.num_qubits, len(self.gate_classes))
-
-        obs = np.zeros(shape=circuit_obs_shape, dtype=Int8)
+        obs = np.zeros(shape=self.observation_space.shape, dtype=Int8)
         dag = circuit_to_dag(qc)
 
         for layer_idx, layer in enumerate(dag.layers()):
             for op_node in layer['graph'].gate_nodes():
                 qubit, gate_idx = self.indices_from_op_node(qc, op_node)
-                obs[layer_idx, qubit, gate_idx] = 1
+                obs[gate_idx, qubit, layer_idx] = 1
 
         return obs
 
@@ -213,8 +211,8 @@ class ExactTransformationCircuitEnv(TransformationCircuitEnv):
         self.weight_depth = weight_depth
         self.weight_gate_count = weight_gate_count
 
-        self.observation_space: spaces.MultiBinary = spaces.MultiBinary(
-            (max_depth, num_qubits, len(gate_classes))
+        self.observation_space: spaces.Box = spaces.Box(
+            0, 1, (len(gate_classes), num_qubits, max_depth), dtype=Int8,
         )
 
     def reward(self) -> float:

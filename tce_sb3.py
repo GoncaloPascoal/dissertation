@@ -2,12 +2,13 @@
 from qiskit import QuantumCircuit, transpile
 from qiskit.transpiler import CouplingMap
 from sb3_contrib import MaskablePPO
-from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+from sb3_contrib.common.maskable.policies import MaskableActorCriticCnnPolicy
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
-from tce import ExactTransformationCircuitEnv
+from conv import CnnFeaturesExtractor
 from exact import CollapseFourAlternatingCnots, CommuteGates, InvertCnot, CommuteRzBetweenCnots
 from gate_class import GateClass, generate_two_qubit_gate_classes_from_coupling_map
+from tce import ExactTransformationCircuitEnv
 
 
 def main():
@@ -15,8 +16,8 @@ def main():
     from qiskit.circuit import Parameter
     from rich import print
 
-    max_depth = 48
-    num_qubits = 3
+    max_depth = 64
+    num_qubits = 8
 
     # Nearest neighbor coupling
     coupling_map = [(q, q + 1) for q in range(num_qubits - 1)]
@@ -48,17 +49,21 @@ def main():
 
     def env_fn() -> ExactTransformationCircuitEnv:
         return ExactTransformationCircuitEnv(max_depth, num_qubits, gate_classes, transformation_rules)
-    env = SubprocVecEnv([env_fn] * 4)
+    vector_env = SubprocVecEnv([env_fn] * 6)
+
+    policy_kwargs = {
+        'features_extractor_class': CnnFeaturesExtractor,
+    }
 
     try:
-        model = MaskablePPO.load('tce_sb3_ppo.model', env)
+        model = MaskablePPO.load('tce_sb3_ppo.model', vector_env)
     except FileNotFoundError:
-        model = MaskablePPO(MaskableActorCriticPolicy, env, n_steps=512, batch_size=16, tensorboard_log='./tce_logs',
-                            learning_rate=1e-3, device='cuda')
+        model = MaskablePPO(MaskableActorCriticCnnPolicy, vector_env, policy_kwargs=policy_kwargs, n_steps=320,
+                            batch_size=16, tensorboard_log='./tce_logs', learning_rate=1e-3)
 
-    learn = False
+    learn = True
     if learn:
-        model.learn(16000, progress_bar=True)
+        model.learn(1920, progress_bar=True)
         model.save('tce_sb3_ppo.model')
 
     env = env_fn()
