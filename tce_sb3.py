@@ -11,7 +11,7 @@ from gate_class import GateClass, generate_two_qubit_gate_classes_from_coupling_
 
 
 def main():
-    from qiskit.circuit.library import RZGate, SXGate, QFT
+    from qiskit.circuit.library import RZGate, SXGate
     from qiskit.circuit import Parameter
     from rich import print
 
@@ -22,13 +22,13 @@ def main():
     coupling_map = [(q, q + 1) for q in range(num_qubits - 1)]
     coupling_map_qiskit = CouplingMap.from_line(num_qubits)
 
-    u = QuantumCircuit(3)
+    u = QuantumCircuit(num_qubits)
     u.toffoli(0, 1, 2)
     u = transpile(u, basis_gates=['cx', 'sx', 'rz'], coupling_map=coupling_map_qiskit,
                   approximation_degree=0.0, seed_transpiler=1)
 
     print(u)
-    print(f'[bold]Target unitary depth:[/bold] {u.depth()}')
+    print(f'[bold blue]Target unitary depth:[/bold blue] {u.depth()}')
 
     rz = RZGate(Parameter('x'))
     sx = SXGate()
@@ -78,8 +78,8 @@ def main():
         total_reward += reward
 
     print(env.current_circuit)
-    print(f'[bold]Optimized depth[/bold] {env.current_circuit.depth()}')
-    print(f'[bold]Total reward:[/bold] {total_reward}')
+    print(f'[bold blue]Optimized depth:[/bold blue] {env.current_circuit.depth()}')
+    print(f'[bold yellow]Total reward:[/bold yellow] {total_reward}')
 
 
 if __name__ == '__main__':

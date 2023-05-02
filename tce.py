@@ -4,8 +4,8 @@ from math import pi
 from typing import Any, Dict, List, Literal, NamedTuple, Optional, SupportsFloat, Tuple
 
 import gymnasium as gym
-from gymnasium import spaces
 import numpy as np
+from gymnasium import spaces
 from nptyping import Int8, NDArray
 from qiskit import QuantumCircuit, transpile
 from qiskit.circuit.exceptions import CircuitError
@@ -67,10 +67,7 @@ class TransformationCircuitEnv(gym.Env, ABC):
     def step(self, action: ActType) -> Tuple[ObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
         decoded = self.decode_action(action)
         if not self.valid_actions[action]:
-            layer, qubit, rule = decoded
-            rule_type = self.transformation_rules[rule]
-            raise ValueError(f'Invalid action selected: {rule_type.__class__.__name__} on layer {layer},'
-                             f'qubit {qubit}')
+            raise ValueError(f'Invalid action selected: {self.format_action(decoded)}')
 
         self.next_circuit = self.generate_next_circuit(decoded)
 
@@ -238,7 +235,7 @@ class ExactTransformationCircuitEnv(TransformationCircuitEnv):
         )
 
     def reset_circuits(self):
-        if self.target_circuit:
+        if self.target_circuit is not None:
             self.current_circuit = self.target_circuit.copy()
             self.current_dag = circuit_to_dag(self.current_circuit)
             self._set_valid_actions()

@@ -90,7 +90,7 @@ class CommuteGates(TransformationRule):
         op_a: Gate = op_node_a.op
         op_b: Gate = op_node_b.op
 
-        if isinstance(op_node_a.op, CXGate) != isinstance(op_node_b.op, CXGate):
+        if isinstance(op_a, CXGate) != isinstance(op_b, CXGate):
             # Exactly one of the two gates is a CNOT
             op_node_cx, op_node_other = op_node_a, op_node_b
             if isinstance(op_b, CXGate):
