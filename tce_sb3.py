@@ -11,11 +11,11 @@ from gate_class import GateClass, generate_two_qubit_gate_classes_from_coupling_
 
 
 def main():
-    from qiskit.circuit.library import RZGate, SXGate
+    from qiskit.circuit.library import RZGate, SXGate, QFT
     from qiskit.circuit import Parameter
     from rich import print
 
-    max_depth = 48
+    max_depth = 64
     num_qubits = 3
 
     # Nearest neighbor coupling
@@ -23,7 +23,7 @@ def main():
     coupling_map_qiskit = CouplingMap.from_line(num_qubits)
 
     u = QuantumCircuit(num_qubits)
-    u.toffoli(0, 1, 2)
+    u = QFT(3)
     u = transpile(u, basis_gates=['cx', 'sx', 'rz'], coupling_map=coupling_map_qiskit,
                   approximation_degree=0.0, seed_transpiler=1)
 
@@ -53,12 +53,12 @@ def main():
     try:
         model = MaskablePPO.load('tce_sb3_ppo.model', env)
     except FileNotFoundError:
-        model = MaskablePPO(MaskableActorCriticPolicy, env, n_steps=512, batch_size=16, tensorboard_log='./tce_logs',
+        model = MaskablePPO(MaskableActorCriticPolicy, env, n_steps=256, batch_size=16, tensorboard_log='./tce_logs',
                             learning_rate=1e-3, device='cuda')
 
     learn = False
     if learn:
-        model.learn(16000, progress_bar=True)
+        model.learn(8192, progress_bar=True)
         model.save('tce_sb3_ppo.model')
 
     env = env_fn()
@@ -69,7 +69,7 @@ def main():
 
     total_reward = 0.0
     while not terminated:
-        action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=True)
+        action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=False)
         action = int(action)
 
         print(env.format_action(action))

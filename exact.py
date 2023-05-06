@@ -7,7 +7,7 @@ from qiskit.converters import dag_to_circuit
 from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 
 from tce import TransformationCircuitEnv, TransformationRule
-from dag_utils import dag_layers, op_node_at
+from dag_utils import op_node_at
 
 
 class InvertCnot(TransformationRule):
@@ -30,29 +30,48 @@ class InvertCnot(TransformationRule):
         dag = env.current_dag
         cx_op_node = op_node_at(dag, layer, qubit)
 
-        new_dag = dag.copy_empty_like()
+        new_dag: DAGCircuit = dag.copy_empty_like()
         hadamard = HGate()
 
-        for i, dag_layer in enumerate(dag_layers(dag)):
-            if i == layer:
-                dag_layer = [n for n in dag_layer if n != cx_op_node]
+        new_dag.apply_operation_back(hadamard, cx_op_node.qargs[:1])
+        new_dag.apply_operation_back(hadamard, cx_op_node.qargs[1:])
 
-            for op_node in dag_layer:
-                new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
+        new_dag.apply_operation_back(cx_op_node.op, cx_op_node.qargs[::-1])
 
-            if i == layer:
-                new_dag.apply_operation_back(hadamard, cx_op_node.qargs[:1])
-                new_dag.apply_operation_back(hadamard, cx_op_node.qargs[1:])
+        new_dag.apply_operation_back(hadamard, cx_op_node.qargs[:1])
+        new_dag.apply_operation_back(hadamard, cx_op_node.qargs[1:])
 
-                new_dag.apply_operation_back(cx_op_node.op, cx_op_node.qargs[::-1])
+        dag.substitute_node_with_dag(cx_op_node, new_dag, list(cx_op_node.qargs))
 
-                new_dag.apply_operation_back(hadamard, cx_op_node.qargs[:1])
-                new_dag.apply_operation_back(hadamard, cx_op_node.qargs[1:])
-
-        return dag_to_circuit(new_dag)
+        return dag_to_circuit(dag, copy_operations=False)
 
 
 class CommuteGates(TransformationRule):
+    """
+    Commutes two adjacent gates. The resulting unitary must be equivalent up to a global phase. The
+    following commutation relations are implemented:
+
+    **1. Rz and CNOT**
+        Z-rotations commute with CNOT gates in the control qubit.
+        ::
+            ┌───────┐               ┌───────┐
+            ┤ Rz(π) ├──■──     ──■──┤ Rz(π) ├
+            └───────┘┌─┴─┐  =  ┌─┴─┐└───────┘
+            ─────────┤ X ├     ┤ X ├─────────
+                     └───┘     └───┘
+
+    **2. Sx and CNOT**
+        X-rotations commute with CNOT gates in the target qubit.
+        ::
+            ────────■──     ──■────────
+            ┌────┐┌─┴─┐  =  ┌─┴─┐┌────┐
+            ┤ √X ├┤ X ├     ┤ X ├┤ √X ├
+            └────┘└───┘     └───┘└────┘
+
+    **3. Between CNOTs**
+        CNOT gates commute if they share a target or control qubit.
+    """
+
     def is_valid(self, env: TransformationCircuitEnv, layer: int, qubit: int) -> bool:
         dag = env.current_dag
         op_node_a, op_node_b = op_node_at(dag, layer, qubit), op_node_at(dag, layer + 1, qubit)
@@ -105,10 +124,6 @@ class CommuteGates(TransformationRule):
                 # Z rotations commute with CNOTs at the control qubit
                 return qubit == cx_control
 
-        if isinstance(op_a, RZGate) and isinstance(op_b, RZGate):
-            # Rz gates with different parameters commute
-            return True
-
         if isinstance(op_a, CXGate) and isinstance(op_b, CXGate):
             # CNOT gates commute if they share a control or target qubit
             return qubits_a[0] == qubits_b[0] or qubits_a[1] == qubits_b[1]
@@ -119,20 +134,9 @@ class CommuteGates(TransformationRule):
         dag = env.current_dag
         op_node_a, op_node_b = op_node_at(dag, layer, qubit), op_node_at(dag, layer + 1, qubit)
 
-        new_dag = dag.copy_empty_like()
+        dag.swap_nodes(op_node_a, op_node_b)
 
-        for i, dag_layer in enumerate(dag_layers(dag)):
-            if i == layer:
-                dag_layer = [n for n in dag_layer if n != op_node_a]
-                dag_layer.append(op_node_b)
-            elif i == layer + 1:
-                dag_layer = [n for n in dag_layer if n != op_node_b]
-                dag_layer.insert(0, op_node_a)
-
-            for op_node in dag_layer:
-                new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
-
-        return dag_to_circuit(new_dag)
+        return dag_to_circuit(dag, copy_operations=False)
 
 
 class CommuteRzBetweenCnots(TransformationRule):
@@ -236,34 +240,15 @@ class CommuteRzBetweenCnots(TransformationRule):
 
         reverse = self._is_reverse(dag, layer, qubit)
         cx_a, rz, cx_b, cx_c = CommuteRzBetweenCnots._assign_op_nodes(op_nodes, reverse)
-        layer_cx_a, layer_rz, layer_cx_b, layer_cx_c = CommuteRzBetweenCnots._assign_layer_indices(layer, reverse)
 
-        new_dag = dag.copy_empty_like()
+        nodes = (cx_b, rz, cx_a)
+        if reverse:
+            nodes = reversed(nodes)
 
-        for i, dag_layer in enumerate(dag_layers(dag)):
-            if i < layer or i >= layer + 4:
-                for op_node in dag_layer:
-                    new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
-            else:
-                if i in {layer_cx_a, layer_rz, layer_cx_b}:
-                    for op_node in dag_layer:
-                        if op_node not in {cx_a, rz, cx_b}:
-                            new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
+        for node in nodes:
+            dag.swap_nodes(node, cx_c)
 
-                    if i == layer_cx_b:
-                        ops = [cx_a, rz, cx_b] if reverse else [cx_c]
-                        for op_node in ops:
-                            new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
-                else:
-                    ops = [cx_c] if reverse else [cx_a, rz, cx_b]
-                    for op_node in ops:
-                        new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
-
-                    for op_node in dag_layer:
-                        if op_node != cx_c:
-                            new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
-
-        return dag_to_circuit(new_dag)
+        return dag_to_circuit(dag, copy_operations=False)
 
 
 class CollapseFourAlternatingCnots(TransformationRule):
@@ -285,4 +270,4 @@ class CollapseFourAlternatingCnots(TransformationRule):
         for op_node in to_remove:
             dag.remove_op_node(op_node)
 
-        return dag_to_circuit(dag)
+        return dag_to_circuit(dag, copy_operations=False)
