@@ -28,6 +28,7 @@ def main():
                   approximation_degree=0.0, seed_transpiler=1)
 
     print(u)
+    print(f'[bold blue]Target unitary gate count:[/bold blue] {u.size()}')
     print(f'[bold blue]Target unitary depth:[/bold blue] {u.depth()}')
 
     rz = RZGate(Parameter('x'))
@@ -47,7 +48,7 @@ def main():
 
     def env_fn() -> ExactTransformationCircuitEnv:
         return ExactTransformationCircuitEnv(max_depth, num_qubits, gate_classes, transformation_rules)
-    vector_env = SubprocVecEnv([env_fn] * 6)
+    vector_env = SubprocVecEnv([env_fn] * 4)
 
     policy_kwargs = {
         'features_extractor_class': CnnFeaturesExtractor,
@@ -56,12 +57,12 @@ def main():
     try:
         model = MaskablePPO.load('tce_sb3_ppo.model', vector_env)
     except FileNotFoundError:
-        model = MaskablePPO(MaskableActorCriticFcnPolicy, vector_env, policy_kwargs=policy_kwargs, n_steps=320,
-                            batch_size=16, tensorboard_log='./tce_logs', learning_rate=1e-3)
+        model = MaskablePPO(MaskableActorCriticFcnPolicy, vector_env, policy_kwargs=policy_kwargs, n_steps=64,
+                            batch_size=8, tensorboard_log='./tce_logs', verbose=2)
 
     learn = True
     if learn:
-        model.learn(1920, progress_bar=True)
+        model.learn(2560, progress_bar=True)
         model.save('tce_sb3_ppo.model')
 
     env = env_fn()
@@ -72,7 +73,7 @@ def main():
 
     total_reward = 0.0
     while not terminated:
-        action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=False)
+        action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=True)
         action = int(action)
 
         print(env.format_action(action))
@@ -81,6 +82,7 @@ def main():
         total_reward += reward
 
     print(env.current_circuit)
+    print(f'[bold blue]Optimized gate count:[/bold blue] {env.current_circuit.size()}')
     print(f'[bold blue]Optimized depth:[/bold blue] {env.current_circuit.depth()}')
     print(f'[bold yellow]Total reward:[/bold yellow] {total_reward}')
 

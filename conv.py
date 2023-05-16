@@ -19,7 +19,7 @@ class CnnFeaturesExtractor(BaseFeaturesExtractor):
 
         input_channels = observation_space.shape[0]
         self.cnn = nn.Sequential(
-            nn.Conv2d(input_channels, 8, 3, padding=2),
+            nn.Conv2d(input_channels, 8, 3, padding=1),
             nn.ReLU(),
             nn.AvgPool2d(2, 2),
             nn.Conv2d(8, 16, 3, padding=1),
@@ -62,14 +62,13 @@ class FcnDecoder(nn.Module):
         action_channels = action_space.n // circuit_area
 
         self.policy_net = nn.Sequential(
-            nn.Conv2d(features_dim, action_channels, 1),
+            nn.ConvTranspose2d(features_dim, features_dim, 3, padding=1, stride=2, output_padding=1),
+            nn.ConvTranspose2d(features_dim, action_channels, 3, padding=1, stride=2, output_padding=1),
         )
         self.value_net = nn.Sequential(
-            nn.Conv2d(features_dim, 1, 1),
+            nn.ConvTranspose2d(features_dim, features_dim, 3, padding=1, stride=2, output_padding=1),
+            nn.ConvTranspose2d(features_dim, 1, 3, padding=1, stride=2, output_padding=1),
         )
-
-        print(self.policy_net)
-        exit(0)
 
     def forward(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.forward_actor(features), self.forward_critic(features)
