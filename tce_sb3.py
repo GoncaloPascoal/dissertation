@@ -2,11 +2,10 @@
 from qiskit import QuantumCircuit, transpile
 from qiskit.transpiler import CouplingMap
 from sb3_contrib import MaskablePPO
-from sb3_contrib.common.maskable.policies import MaskableActorCriticCnnPolicy
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
-from conv import CnnFeaturesExtractor
-from exact import CollapseFourAlternatingCnots, CommuteGates, InvertCnot, CommuteRzBetweenCnots
+from conv import CnnFeaturesExtractor, MaskableActorCriticFcnPolicy
+from exact import CommuteGates, InvertCnot, CommuteRzBetweenCnots
 from gate_class import GateClass, generate_two_qubit_gate_classes_from_coupling_map
 from tce import ExactTransformationCircuitEnv
 
@@ -43,7 +42,6 @@ def main():
     transformation_rules = [
         CommuteGates(),
         CommuteRzBetweenCnots(),
-        CollapseFourAlternatingCnots(),
         InvertCnot(),
     ]
 
@@ -58,7 +56,7 @@ def main():
     try:
         model = MaskablePPO.load('tce_sb3_ppo.model', vector_env)
     except FileNotFoundError:
-        model = MaskablePPO(MaskableActorCriticCnnPolicy, vector_env, policy_kwargs=policy_kwargs, n_steps=320,
+        model = MaskablePPO(MaskableActorCriticFcnPolicy, vector_env, policy_kwargs=policy_kwargs, n_steps=320,
                             batch_size=16, tensorboard_log='./tce_logs', learning_rate=1e-3)
 
     learn = True
