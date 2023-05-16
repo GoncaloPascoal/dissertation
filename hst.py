@@ -26,14 +26,13 @@ class HilbertSchmidt(QuantumCircuit):
             qc.cx(i, i + n)
 
         qc.compose(u.to_gate(label='U'), sys_a, inplace=True)
-        qc.compose(v.inverse().to_gate(label='V*'), sys_b, inplace=True)
+        qc.compose(v.inverse().to_gate(label='V*'), sys_a, inplace=True)
 
         qubits = range(n) if measure_qubit is None else [measure_qubit]
-        for i in qubits:
+        for i in reversed(qubits):
             qc.cx(i, i + n)
             qc.h(i)
 
-        qc.barrier()
         if measure_qubit is None:
             qc.measure_all(add_bits=False)
         else:
@@ -105,6 +104,7 @@ def fidelity_llet(counts_list: Collection[Dict[str, int]]) -> float:
         total += ratios.get('0', 0.0)
 
     return total / n
+
 
 def cost_hst(counts: Dict[str, int]) -> float:
     """
