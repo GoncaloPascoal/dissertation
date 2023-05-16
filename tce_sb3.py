@@ -12,7 +12,7 @@ from tce import ExactTransformationCircuitEnv
 
 
 def main():
-    from qiskit.circuit.library import RZGate, SXGate
+    from qiskit.circuit.library import RZGate, SXGate, QFT
     from qiskit.circuit import Parameter
     from rich import print
 
@@ -24,7 +24,7 @@ def main():
     coupling_map_qiskit = CouplingMap.from_line(num_qubits)
 
     u = QuantumCircuit(num_qubits)
-    u.toffoli(0, 1, 2)
+    u = QFT(3)
     u = transpile(u, basis_gates=['cx', 'sx', 'rz'], coupling_map=coupling_map_qiskit,
                   approximation_degree=0.0, seed_transpiler=1)
 
@@ -74,7 +74,7 @@ def main():
 
     total_reward = 0.0
     while not terminated:
-        action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=True)
+        action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=False)
         action = int(action)
 
         print(env.format_action(action))
