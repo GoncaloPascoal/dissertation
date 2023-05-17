@@ -44,6 +44,7 @@ class TransformationCircuitEnv(gym.Env, ABC):
         *,
         max_time_steps: int = 32,
         target_circuit: Optional[QuantumCircuit] = None,
+        training: bool = True,
     ):
         self.max_depth = max_depth
         self.num_qubits = num_qubits
@@ -52,8 +53,12 @@ class TransformationCircuitEnv(gym.Env, ABC):
 
         self.action_space: spaces.Discrete = spaces.Discrete(max_depth * num_qubits * len(transformation_rules))
 
-        self.target_circuit = target_circuit
+        if target_circuit is None:
+            target_circuit = QuantumCircuit(num_qubits)
+
         self.max_time_steps = max_time_steps
+        self.target_circuit = target_circuit
+        self.training = training
 
         self.current_circuit = QuantumCircuit(num_qubits)
         self.current_dag = circuit_to_dag(self.current_circuit)
@@ -69,7 +74,7 @@ class TransformationCircuitEnv(gym.Env, ABC):
         if not self.valid_actions[action]:
             raise ValueError(f'Invalid action selected: {self.format_action(decoded)}')
 
-        self.next_circuit = self.generate_next_circuit(decoded)
+        self.next_circuit = self.build_next_circuit(decoded)
 
         reward = self.reward()
 
@@ -80,29 +85,39 @@ class TransformationCircuitEnv(gym.Env, ABC):
         self.time_step += 1
         terminated = self.time_step == self.max_time_steps or not self.valid_actions.any()
 
-        return self.observation(), reward, terminated, False, {}
+        return self.current_obs(), reward, terminated, False, {}
 
     def reset(self, *, seed=None, options=None) -> Tuple[ObsType, Dict[str, Any]]:
         self.reset_circuits()
         self.time_step = 0
 
-        return self.observation(), {}
+        return self.current_obs(), {}
 
     @abstractmethod
     def reward(self) -> float:
         raise NotImplementedError
 
     @abstractmethod
-    def observation(self) -> ObsType:
+    def current_obs(self) -> ObsType:
         raise NotImplementedError
 
     @abstractmethod
-    def generate_next_circuit(self, decoded_action: DecodedAction) -> QuantumCircuit:
+    def build_next_circuit(self, decoded_action: DecodedAction) -> QuantumCircuit:
         raise NotImplementedError
 
-    @abstractmethod
     def reset_circuits(self):
-        raise NotImplementedError
+        if self.training:
+            while True:
+                self.current_circuit = self._generate_random_circuit()
+                self.current_dag = circuit_to_dag(self.current_circuit)
+                self._set_valid_actions()
+                if self.valid_actions.any():
+                    self.target_circuit = self.current_circuit.copy()
+                    break
+        else:
+            self.current_circuit = self.target_circuit.copy()
+            self.current_dag = circuit_to_dag(self.current_circuit)
+            self._set_valid_actions()
 
     def action_masks(self) -> NDArray[Literal['*'], Int8]:
         return self.valid_actions
@@ -221,26 +236,13 @@ class ExactTransformationCircuitEnv(TransformationCircuitEnv):
 
         return self.weight_depth * depth_diff + self.weight_gate_count * gate_count_diff
 
-    def observation(self) -> ObsType:
+    def current_obs(self) -> ObsType:
         return self.circuit_to_obs(self.current_circuit)
 
-    def generate_next_circuit(self, decoded_action: TransformationCircuitEnv.DecodedAction) -> QuantumCircuit:
+    def build_next_circuit(self, decoded_action: TransformationCircuitEnv.DecodedAction) -> QuantumCircuit:
         rule = self.transformation_rules[decoded_action.rule]
         return transpile(
             rule.apply(self, decoded_action.layer, decoded_action.qubit),
             approximation_degree=0.0,
             basis_gates=self.basis_gates,
         )
-
-    def reset_circuits(self):
-        if self.target_circuit is not None:
-            self.current_circuit = self.target_circuit.copy()
-            self.current_dag = circuit_to_dag(self.current_circuit)
-            self._set_valid_actions()
-        else:
-            while True:
-                self.current_circuit = self._generate_random_circuit()
-                self.current_dag = circuit_to_dag(self.current_circuit)
-                self._set_valid_actions()
-                if self.valid_actions.any():
-                    break

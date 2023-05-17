@@ -15,8 +15,8 @@ def main():
     from qiskit.circuit import Parameter
     from rich import print
 
-    max_depth = 64
-    num_qubits = 8
+    max_depth = 32
+    num_qubits = 4
 
     # Nearest neighbor coupling
     coupling_map = [(q, q + 1) for q in range(num_qubits - 1)]
@@ -58,7 +58,7 @@ def main():
         model = MaskablePPO.load('tce_sb3_ppo.model', vector_env)
     except FileNotFoundError:
         model = MaskablePPO(MaskableActorCriticFcnPolicy, vector_env, policy_kwargs=policy_kwargs, n_steps=64,
-                            batch_size=8, tensorboard_log='./tce_logs', verbose=2)
+                            batch_size=8, tensorboard_log='./tce_logs')
 
     learn = True
     if learn:
@@ -66,8 +66,11 @@ def main():
         model.save('tce_sb3_ppo.model')
 
     env = env_fn()
+
     env.target_circuit = u
+    env.training = False
     env.max_time_steps = 128
+
     obs, _ = env.reset()
     terminated = False
 
