@@ -192,6 +192,56 @@ class ShiftQubits(TransformationRule):
         return dag_to_circuit(dag, copy_operations=False)
 
 
+class ChangeGateClass(TransformationRule):
+    def __init__(self, next_class: bool):
+        self.offset = 1 if next_class else -1
+
+    def is_valid(self, env: 'TransformationCircuitEnv', layer: int, qubit: int) -> bool:
+        dag = env.current_dag
+        op_node = op_node_at(dag, layer, qubit)
+
+        if op_node is None:
+            return False
+
+        first_qubit, class_idx = env.indices_from_op_node(env.current_circuit, op_node)
+
+        if first_qubit != qubit:
+            return False
+
+        class_idx = (class_idx + self.offset) % len(env.gate_classes)
+        new_class = env.gate_classes[class_idx]
+
+        qubits = new_class.qubits(qubit)
+        for q in qubits:
+            op_node_dst = op_node_at(dag, layer, q)
+            if op_node_dst is not None and op_node_dst != op_node:
+                # Already a gate at the target location
+                return False
+
+        return True
+
+    def apply(self, env: 'TransformationCircuitEnv', layer: int, qubit: int) -> QuantumCircuit:
+        dag = env.current_dag
+        op_node_target = op_node_at(dag, layer, qubit)
+
+        new_dag = dag.copy_empty_like()
+
+        _, class_idx = env.indices_from_op_node(env.current_circuit, op_node_target)
+
+        class_idx = (class_idx + self.offset) % len(env.gate_classes)
+        new_class = env.gate_classes[class_idx]
+        qubits = new_class.qubits(qubit)
+        qargs = [dag.qubits[q] for q in qubits]
+
+        for op_node in dag.op_nodes(include_directives=False):
+            if op_node == op_node_target:
+                new_dag.apply_operation_back(new_class.gate, qargs)
+            else:
+                new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
+
+        return dag_to_circuit(dag, copy_operations=False)
+
+
 class RemoveGate(TransformationRule):
     def is_valid(self, env: 'TransformationCircuitEnv', layer: int, qubit: int) -> bool:
         dag = env.current_dag
@@ -255,8 +305,10 @@ class AddGate(TransformationRule):
         qubits = self.gate_class.qubits(qubit)
 
         for i, dag_layer in enumerate(layers):
+            for op_node in dag_layer:
+                new_dag.apply_operation_back(op_node.op, op_node.qargs, op_node.cargs)
+
             if i == layer:
-                new_dag.apply_operation_front(gate, qubits)
-            new_dag.compose(dag_layer, dag.qubits, dag.clbits, inplace=True)
+                new_dag.apply_operation_back(gate, qubits)
 
         return dag_to_circuit(new_dag, copy_operations=False)
