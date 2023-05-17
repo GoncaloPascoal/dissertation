@@ -1,13 +1,59 @@
-from typing import List, Tuple
 
-from qiskit import QuantumCircuit
+from typing import List, Tuple, Literal
+
+from gymnasium import spaces
+from nptyping import NDArray, Int8
+
+from qiskit import QuantumCircuit, transpile
 from qiskit.circuit import Gate
 from qiskit.circuit.library import CXGate, HGate, RXGate, RZGate, SXGate
 from qiskit.converters import dag_to_circuit
 from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 
+from gate_class import GateClass
 from tce import TransformationCircuitEnv, TransformationRule
 from dag_utils import op_node_at
+
+
+class ExactTransformationCircuitEnv(TransformationCircuitEnv):
+    ObsType = NDArray[Literal['*, *, *'], Int8]
+
+    def __init__(
+        self,
+        max_depth: int,
+        num_qubits: int,
+        gate_classes: List[GateClass],
+        transformation_rules: List[TransformationRule],
+        *,
+        weight_depth: float = 1.0,
+        weight_gate_count: float = 0.2,
+        **kwargs,
+    ):
+        super().__init__(max_depth, num_qubits, gate_classes, transformation_rules, **kwargs)
+
+        self.weight_depth = weight_depth
+        self.weight_gate_count = weight_gate_count
+
+        self.observation_space: spaces.Box = spaces.Box(
+            0, 1, (len(gate_classes), num_qubits, max_depth), dtype=Int8,
+        )
+
+    def reward(self) -> float:
+        depth_diff = self.current_circuit.depth() - self.next_circuit.depth()
+        gate_count_diff = self.current_circuit.size() - self.next_circuit.size()
+
+        return self.weight_depth * depth_diff + self.weight_gate_count * gate_count_diff
+
+    def current_obs(self) -> ObsType:
+        return self.circuit_to_obs(self.current_circuit)
+
+    def build_next_circuit(self, decoded_action: TransformationCircuitEnv.DecodedAction) -> QuantumCircuit:
+        rule = self.transformation_rules[decoded_action.rule]
+        return transpile(
+            rule.apply(self, decoded_action.layer, decoded_action.qubit),
+            approximation_degree=0.0,
+            basis_gates=self.basis_gates,
+        )
 
 
 class InvertCnot(TransformationRule):

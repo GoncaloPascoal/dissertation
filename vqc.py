@@ -43,6 +43,9 @@ class VqcTransformationCircuitEnv(TransformationCircuitEnv):
         self.current_cost = 0.0
         self.next_cost = 0.0
 
+        self.best_reward = 0.0
+        self.best_circuit = self.target_circuit.copy()
+
     def _calculate_reward(self, depth_diff: float, gate_count_diff: float, cost_diff: float) -> float:
         reward_depth = np.sign(depth_diff) * abs(depth_diff) ** self.exponent_depth
         reward_gate_count = np.sign(gate_count_diff) * abs(gate_count_diff) ** self.exponent_gate_count
@@ -78,6 +81,9 @@ class VqcTransformationCircuitEnv(TransformationCircuitEnv):
         else:
             discovery_reward = 0.0
 
+        if not self.training and discovery_reward > self.best_reward:
+            self.best_reward, self.best_circuit = discovery_reward, self.next_circuit.copy()
+
         return incremental_reward + discovery_reward
 
     def current_obs(self) -> ObsType:
@@ -96,6 +102,13 @@ class VqcTransformationCircuitEnv(TransformationCircuitEnv):
         self.next_cost = cost
 
         return qc.bind_parameters(params)
+
+    def reset_circuits(self):
+        super().reset_circuits()
+
+        if not self.training:
+            self.best_reward = 0.0
+            self.best_circuit = self.target_circuit.copy()
 
 
 class SwapGates(TransformationRule):
