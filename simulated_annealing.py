@@ -30,29 +30,43 @@ SolutionType = TypeVar('SolutionType')
 
 
 class SimulatedAnnealing(ABC, Generic[SolutionType]):
-    _logger = logging.getLogger(__name__)
-    _logger.setLevel(logging.INFO)
-    _logger.addHandler(RichHandler())
-
-    def __init__(self, max_iterations: int, *, initial_temperature: float = 0.2, beta: Optional[float] = 1.5):
+    def __init__(
+        self,
+        max_iterations: int,
+        *,
+        seed: Optional[int] = None,
+        log_level: int = logging.INFO,
+        tolerance: float = 1e-2,
+        use_acceptance_iterations: bool = False,
+        initial_temperature: float = 0.2,
+        beta: Optional[float] = 1.5,
+    ):
         assert max_iterations > 0
+        assert tolerance > 0.0
         assert initial_temperature > 0.0
         if beta is not None:
             assert beta > 0.0
 
         self.max_iterations = max_iterations
+        self.tolerance = tolerance
+        self.use_acceptance_iterations = use_acceptance_iterations
         self.initial_temperature = initial_temperature
         self.beta = beta
 
         self.temperature = initial_temperature
 
+        self.rng = random.Random(seed)
+
+        self._logger = logging.getLogger(__name__)
+        self._logger.setLevel(log_level)
+        self._logger.addHandler(RichHandler())
+
         self.best_solution = self._generate_initial_solution()
         self.best_cost = self._evaluate_solution(self.best_solution)
+        self._logger.info(f'Initial solution has cost {self.best_cost:.4f}')
 
         self.current_solution = self._copy_solution(self.best_solution)
         self.current_cost = self.best_cost
-
-        self._logger.info(f'Initial solution has cost {self.best_cost:.4f}')
 
     @abstractmethod
     def _generate_initial_solution(self) -> SolutionType:
@@ -70,13 +84,13 @@ class SimulatedAnnealing(ABC, Generic[SolutionType]):
     def _generate_neighbor(self) -> SolutionType:
         raise NotImplementedError
 
-    @abstractmethod
-    def _terminated(self) -> bool:
-        raise NotImplementedError
-
     def run(self) -> Tuple[SolutionType, float]:
         i = 1
-        progress = tqdm_rich(initial=i, total=self.max_iterations)
+        self.temperature = self.initial_temperature
+
+        if self._logger.level <= logging.INFO:
+            progress = tqdm_rich(initial=i, total=self.max_iterations)
+
         while i < self.max_iterations:
             if self._terminated():
                 break
@@ -92,16 +106,24 @@ class SimulatedAnnealing(ABC, Generic[SolutionType]):
 
             # Determine probability of accepting neighboring solution
             cost_penalty = cost - self.current_cost
-            if cost_penalty <= 0 or random.random() <= exp(-cost_penalty / self.temperature):
+            accepted = False
+            if cost_penalty <= 0 or self.rng.random() <= exp(-cost_penalty / self.temperature):
                 self.current_solution, self.current_cost = self._copy_solution(neighbor), cost
+                accepted = True
+
+            if not self.use_acceptance_iterations or accepted:
                 i += 1
-                progress.update(1)
+                if self._logger.level <= logging.INFO:
+                    progress.update(1)
 
             # Annealing schedule
             if self.beta is not None:
                 self.temperature = self.initial_temperature * pow(1.0 - i / self.max_iterations, self.beta)
 
         return self.best_solution, self.best_cost
+
+    def _terminated(self) -> bool:
+        return self.best_cost <= self.tolerance
 
 
 class NeighborhoodType(Enum):
@@ -121,11 +143,9 @@ class StructuralSimulatedAnnealing(SimulatedAnnealing[QuantumCircuit]):
         continuous_optimization: ContinuousOptimizationFunction,
         max_instructions: int,
         min_instructions: int = 0,
-        tolerance: float = 1e-2,
         **kwargs,
     ):
         assert max_instructions >= min_instructions >= 0
-        assert tolerance > 0.0
 
         self.u = u
         self.native_instructions = native_instructions
@@ -140,7 +160,6 @@ class StructuralSimulatedAnnealing(SimulatedAnnealing[QuantumCircuit]):
         self.max_iterations = max_iterations
         self.max_instructions = max_instructions
         self.min_instructions = min_instructions
-        self.tolerance = tolerance
 
         self.param_gen = ParameterGenerator()
 
@@ -155,7 +174,7 @@ class StructuralSimulatedAnnealing(SimulatedAnnealing[QuantumCircuit]):
         qc = QuantumCircuit(self.u.num_qubits)
 
         for _ in range(self.max_instructions):
-            instruction, qubits = random.choice(self.native_instructions)
+            instruction, qubits = self.rng.choice(self.native_instructions)
 
             if instruction.is_parameterized():
                 instruction = self.param_gen.parameterize(instruction)
@@ -187,7 +206,7 @@ class StructuralSimulatedAnnealing(SimulatedAnnealing[QuantumCircuit]):
         if not options:
             raise ValueError('Circuit contains no resolvable identities.')
 
-        op_node, qubits = random.choice(options)
+        op_node, qubits = self.rng.choice(options)
 
         idx = 0
         for i, n in enumerate(dag.op_nodes(include_directives=False)):
@@ -270,14 +289,14 @@ class StructuralSimulatedAnnealing(SimulatedAnnealing[QuantumCircuit]):
         if num_instructions < 2:
             types.discard(NeighborhoodType.SWAP_INSTRUCTIONS)
 
-        n_type = random.choice(list(types))
+        n_type = self.rng.choice(list(types))
         match n_type:
             case NeighborhoodType.ADD_INSTRUCTION:
-                new_instruction = random.choice(self.instruction_set)
+                new_instruction = self.rng.choice(self.instruction_set)
                 try:
                     neighbor = self._resolve_random_identity(new_instruction)
                 except ValueError:
-                    qubits = random.choice([
+                    qubits = self.rng.choice([
                         i[1] for i in self.native_instructions
                         if i[0] == new_instruction
                     ])
@@ -287,32 +306,32 @@ class StructuralSimulatedAnnealing(SimulatedAnnealing[QuantumCircuit]):
 
                     neighbor = self.current_solution.compose(new_instruction, qubits)
             case NeighborhoodType.CHANGE_INSTRUCTION:
-                idx = random.randrange(num_instructions)
+                idx = self.rng.randrange(num_instructions)
                 instruction: CircuitInstruction = self.current_solution.data[idx]
                 qubits = tuple(self.current_solution.find_bit(q).index for q in instruction.qubits)
                 qubit_set = set(qubits)
 
-                new_instruction = random.choice([
+                new_instruction = self.rng.choice([
                     i for i in self.instruction_set
                     if i.name != instruction.operation.name
                 ])
 
                 if new_instruction.num_qubits < len(qubits):
                     # Apply single-qubit instruction to one of the qubits from the two-qubit instruction
-                    qubits = random.choice([
+                    qubits = self.rng.choice([
                         i[1] for i in self.native_instructions
                         if i[0].name == new_instruction.name and qubit_set.issuperset(i[1])
                     ])
                 elif new_instruction.num_qubits > len(qubits):
                     # Apply two-qubit instruction to a pair containing the qubit from the single-qubit instruction
-                    qubits = random.choice([
+                    qubits = self.rng.choice([
                         i[1] for i in self.native_instructions
                         if i[0].name == new_instruction.name and qubit_set.issubset(i[1])
                     ])
 
                 neighbor = self._change_instruction(idx, new_instruction, qubits)
             case NeighborhoodType.CHANGE_QUBITS:
-                idx = random.randrange(num_instructions)
+                idx = self.rng.randrange(num_instructions)
                 instruction: CircuitInstruction = self.current_solution.data[idx]
 
                 old_qubits = tuple(self.current_solution.find_bit(q).index for q in instruction.qubits)
@@ -320,20 +339,17 @@ class StructuralSimulatedAnnealing(SimulatedAnnealing[QuantumCircuit]):
                     i for i in self.native_instructions
                     if i[0].name == instruction.operation.name and i[1] != old_qubits
                 ]
-                _, new_qubits = random.choice(filtered_instructions)
+                _, new_qubits = self.rng.choice(filtered_instructions)
 
                 neighbor = self._change_qubits(idx, new_qubits)
             case NeighborhoodType.REMOVE_INSTRUCTION:
-                idx = random.randrange(num_instructions)
+                idx = self.rng.randrange(num_instructions)
                 neighbor = self._remove_instruction(idx)
             case NeighborhoodType.SWAP_INSTRUCTIONS:
-                idx = random.randrange(num_instructions - 1)
+                idx = self.rng.randrange(num_instructions - 1)
                 neighbor = self._swap_instructions(idx)
 
         return neighbor
-
-    def _terminated(self) -> bool:
-        return self.best_cost <= self.tolerance
 
 
 def main():
@@ -345,12 +361,12 @@ def main():
     cx = CXGate()
 
     native_instructions = [
-        (sx, (0,)),
-        (sx, (1,)),
-        (rz, (0,)),
-        (rz, (1,)),
-        (cx, (0, 1)),
-        (cx, (1, 0)),
+        NativeInstruction(sx, (0,)),
+        NativeInstruction(sx, (1,)),
+        NativeInstruction(rz, (0,)),
+        NativeInstruction(rz, (1,)),
+        NativeInstruction(cx, (0, 1)),
+        NativeInstruction(cx, (1, 0)),
     ]
 
     def continuous_optimization(
