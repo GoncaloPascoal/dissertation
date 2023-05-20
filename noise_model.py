@@ -9,7 +9,7 @@ from qiskit_ibm_provider import IBMProvider
 
 from rich import print
 
-from gradient_based import gradient_based_hst_weighted
+from vqc.optimization.continuous.gradient_based import gradient_based_hst_weighted
 
 if __name__ == '__main__':
     provider = IBMProvider()

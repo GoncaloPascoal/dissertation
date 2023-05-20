@@ -13,9 +13,8 @@ from qiskit.providers.fake_provider import FakeTenerife, FakeRueschlikon
 
 from rich import print
 
-from gradient_based import gradient_based_hst_weighted
-from gradient_free import gradient_free_hst
-from simulated_annealing import SimulatedAnnealing
+from vqc.optimization.continuous.gradient_based import gradient_based_hst_weighted
+from vqc.optimization.discrete.simulated_annealing import StructuralSimulatedAnnealing
 
 
 def run_small_scale_implementation(u: QuantumCircuit, backend: Backend, max_iterations: int):
@@ -45,14 +44,13 @@ def run_small_scale_implementation(u: QuantumCircuit, backend: Backend, max_iter
         ]
     )
 
-    sa = SimulatedAnnealing(u, native_instructions, continuous_optimization, max_iterations, max_instructions)
-    v, params, cost = sa.run()
+    sa = StructuralSimulatedAnnealing(max_iterations, u, native_instructions, continuous_optimization, max_instructions)
+    v, cost = sa.run()
 
     print('[bold]Compilation Result (V)[/bold]')
     print(v.draw())
 
-    params_pi = [f'{p / pi:4f}π' for p in params]
-    print(f'The optimal parameters were {params_pi}, with a cost of {cost:.4f}')
+    print(f'The best cost was {cost:.4f}')
 
 
 def dressed_cnot(param_num: int) -> Tuple[QuantumCircuit, int]:

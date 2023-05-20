@@ -10,7 +10,7 @@ from qiskit import QuantumCircuit
 from rich.logging import RichHandler
 
 from parameter_generator import ParameterGenerator
-from gradient_based import gradient_based_hst_weighted
+from vqc.optimization.continuous.gradient_based import gradient_based_hst_weighted
 from rl import NativeInstruction
 from utils import create_native_instruction_dict, ContinuousOptimizationFunction
 
@@ -293,6 +293,7 @@ class GeneticAlgorithm:
 
         self.cache_fitness = cache_fitness
         self.solution_cache = {}
+        self.generation_improved = False
 
     def _generate_solution(self) -> Solution:
         genome = []
@@ -329,6 +330,7 @@ class GeneticAlgorithm:
         if cost < self.best_cost:
             self.best_v, self.best_params, self.best_cost = v.copy(), params, cost
             self._logger.info(f'Cost decreased to {cost:.4f} in generation {self.generation}')
+            self.generation_improved = True
 
         fitness = 1.0 - cost
         if self.cache_fitness:
@@ -389,8 +391,12 @@ class GeneticAlgorithm:
                 new_population.append(Solution(first_genome))
                 new_population.append(Solution(second_genome))
 
+            if self.generation_improved:
+                self._logger.info(f'Best solution so far:\n{self.best_v}')
+
             self.population = new_population
             self.generation += 1
+            self.generation_improved = False
 
         return self.best_v, self.best_params, self.best_cost
 
@@ -401,8 +407,9 @@ def main():
     from qiskit.circuit.library import SXGate, RZGate, CXGate, QFT
     from qiskit.circuit import Parameter
 
-    u = QuantumCircuit(2)
-    u.ch(0, 1)
+    from rich import print
+
+    u = QFT(2)
 
     sx = SXGate()
     rz = RZGate(Parameter('x'))
@@ -420,12 +427,12 @@ def main():
     def continuous_optimization(u: QuantumCircuit, v: QuantumCircuit):
         return gradient_based_hst_weighted(u, v, sample_precision=5e-4)
 
-    algo = GeneticAlgorithm(u, actions, continuous_optimization, 6, 1e-2, 15,
+    algo = GeneticAlgorithm(u, actions, continuous_optimization, 10, 1e-2, 15,
                             TournamentSelection(),
                             KPointCrossover(1), 20, mutation_rate=3e-2)
 
     v, params, cost = algo.run()
-    print(v.draw())
+    print(f'\n{v}')
 
     params_pi = [f'{p / pi:.4f}π' for p in params]
     print(f'The best parameters were {params_pi} with a cost of {cost:.4f}.')
