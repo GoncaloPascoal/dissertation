@@ -4,9 +4,9 @@ from qiskit.transpiler import CouplingMap
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
-from conv import CnnFeaturesExtractor, MaskableActorCriticFcnPolicy
-from exact import CommuteGates, InvertCnot, CommuteRzBetweenCnots, ExactTransformationCircuitEnv
-from gate_class import GateClass, generate_two_qubit_gate_classes_from_coupling_map
+from transformation.cnn import CnnFeaturesExtractor, MaskableActorCriticFcnPolicy
+from transformation.exact import CommuteGates, InvertCnot, CommuteRzBetweenCnots, ExactTransformationCircuitEnv
+from transformation.gate_class import GateClass, generate_two_qubit_gate_classes_from_coupling_map
 
 
 def main():

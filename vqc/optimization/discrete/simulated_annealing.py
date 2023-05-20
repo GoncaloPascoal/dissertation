@@ -22,7 +22,7 @@ from utils import ContinuousOptimizationFunction, ContinuousOptimizationResult
 
 from rich import print
 
-from gradient_based import gradient_based_hst_weighted
+from vqc.optimization.continuous.gradient_based import gradient_based_hst_weighted
 from utils import NativeInstruction
 
 

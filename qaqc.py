@@ -13,9 +13,8 @@ from qiskit.providers.fake_provider import FakeTenerife, FakeRueschlikon
 
 from rich import print
 
-from gradient_based import gradient_based_hst_weighted
-from gradient_free import gradient_free_hst
-from simulated_annealing import StructuralSimulatedAnnealing
+from vqc.optimization.continuous.gradient_based import gradient_based_hst_weighted
+from vqc.optimization.discrete.simulated_annealing import StructuralSimulatedAnnealing
 
 
 def run_small_scale_implementation(u: QuantumCircuit, backend: Backend, max_iterations: int):

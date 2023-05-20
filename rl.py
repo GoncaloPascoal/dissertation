@@ -14,7 +14,7 @@ from ray.rllib.algorithms.sac import SACConfig
 from ray.rllib.utils.schedules import PiecewiseSchedule
 
 from parameter_generator import ParameterGenerator
-from gradient_based import gradient_based_hst_weighted
+from vqc.optimization.continuous.gradient_based import gradient_based_hst_weighted
 from utils import NativeInstruction
 
 

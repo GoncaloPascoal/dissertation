@@ -11,7 +11,7 @@ from qiskit.converters import dag_to_circuit
 from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 
 from gate_class import GateClass
-from tce import TransformationCircuitEnv, TransformationRule
+from transformation.env import TransformationCircuitEnv, TransformationRule
 from dag_utils import op_node_at
 
 

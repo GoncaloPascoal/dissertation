@@ -8,9 +8,9 @@ from qiskit.converters import dag_to_circuit
 
 from dag_utils import op_node_at, dag_layers
 from gate_class import GateClass
-from gradient_based import gradient_based_hst_weighted
+from vqc.optimization.continuous.gradient_based import gradient_based_hst_weighted
 from parameter_generator import ParameterGenerator
-from tce import TransformationCircuitEnv, TransformationRule
+from transformation.env import TransformationCircuitEnv, TransformationRule
 from utils import ContinuousOptimizationFunction
 
 

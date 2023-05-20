@@ -1,5 +1,5 @@
+
 import logging
-from collections.abc import Set
 from fractions import Fraction
 from math import pi
 from typing import Optional, Sequence, Callable, List
@@ -11,7 +11,7 @@ from qiskit.providers.backend import Backend
 import skopt
 
 from hst import HilbertSchmidt, cost_hst
-from simulated_annealing import SimulatedAnnealing
+from vqc.optimization.discrete.simulated_annealing import SimulatedAnnealing
 from utils import ContinuousOptimizationResult
 
 

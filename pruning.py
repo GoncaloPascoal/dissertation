@@ -44,7 +44,7 @@ def iterative_pruning(
 def main():
     from qiskit.circuit import Parameter
 
-    from gradient_based import gradient_based_hst_weighted
+    from vqc.optimization.continuous.gradient_based import gradient_based_hst_weighted
 
     u = QuantumCircuit(1)
     v = QuantumCircuit(1)

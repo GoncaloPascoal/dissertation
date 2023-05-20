@@ -117,7 +117,7 @@ if __name__ == '__main__':
     from qiskit.circuit import Parameter
     from qiskit.circuit.library import SXGate, RZGate, CXGate
 
-    from gradient_based import gradient_based_hst_weighted
+    from vqc.optimization.continuous.gradient_based import gradient_based_hst_weighted
 
     u = QuantumCircuit(1)
     u.h(0)
