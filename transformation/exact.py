@@ -10,7 +10,7 @@ from qiskit.circuit.library import CXGate, HGate, RXGate, RZGate, SXGate
 from qiskit.converters import dag_to_circuit
 from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 
-from gate_class import GateClass
+from transformation.gate_class import GateClass
 from transformation.env import TransformationCircuitEnv, TransformationRule
 from dag_utils import op_node_at
 

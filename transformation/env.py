@@ -12,7 +12,7 @@ from qiskit.circuit.exceptions import CircuitError
 from qiskit.converters import circuit_to_dag
 from qiskit.dagcircuit import DAGOpNode
 
-from gate_class import GateClass
+from transformation.gate_class import GateClass
 from utils import index_with_key
 
 
