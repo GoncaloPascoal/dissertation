@@ -1,4 +1,5 @@
 
+import random
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -37,7 +38,7 @@ class Random(CircuitGenerator):
 
 
 class LayeredRandom(CircuitGenerator):
-    def __init__(self, num_qubits: int, num_layers: int, density: float):
+    def __init__(self, num_qubits: int, num_layers: int = 1, density: float = 1.0):
         super().__init__(num_qubits)
 
         if num_layers <= 0:
@@ -49,7 +50,15 @@ class LayeredRandom(CircuitGenerator):
         self.num_layers = num_layers
         self.density = density
 
+        self.cnots_per_layer = int(density * num_qubits // 2)
+
     def generate(self) -> QuantumCircuit:
-        # TODO
         qc = QuantumCircuit(self.num_qubits)
+        qubits = list(range(self.num_qubits))
+
+        for _ in range(self.num_layers):
+            selected = random.sample(qubits, 2 * self.cnots_per_layer)
+            for i in range(0, len(selected), 2):
+                qc.cx(*selected[i:i + 2])
+
         return qc
