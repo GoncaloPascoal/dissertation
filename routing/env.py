@@ -29,12 +29,14 @@ class QubitRoutingEnv(gym.Env[NDArray, NDArray]):
         circuit_generator: CircuitGenerator,
         cnot_reward: float = 1.0,
         distance_reduction_reward: float = 0.1,
+        training: bool = True,
     ):
         self.coupling_map = coupling_map
         self.circuit_generator = circuit_generator
 
         self.cnot_reward = cnot_reward
         self.distance_reduction_reward = distance_reduction_reward
+        self.training = training
 
         self.shortest_paths = rx.all_pairs_dijkstra_shortest_paths(coupling_map, lambda e: 1.0)
         self.distance_matrix = rx.distance_matrix(coupling_map)
@@ -87,7 +89,7 @@ class QubitRoutingEnv(gym.Env[NDArray, NDArray]):
         self._update_qubit_targets()
 
         post_swap_distances = self._qubit_distances()
-        reward += np.sum(post_swap_distances - pre_swap_distances < 0) * self.distance_reduction_reward
+        reward += np.sum(np.sign(pre_swap_distances - post_swap_distances)) * self.distance_reduction_reward
 
         terminated = np.all(self.qubit_targets == -1)
 
@@ -99,7 +101,10 @@ class QubitRoutingEnv(gym.Env[NDArray, NDArray]):
         seed: Optional[int] = None,
         options: Optional[Dict[str, Any]] = None,
     ) -> Tuple[NDArray, Dict[str, Any]]:
-        self._generate_circuit()
+        if self.training:
+            self._generate_circuit()
+        else:
+            self._reset_dag()
 
         return self._current_obs(), {}
 
@@ -114,6 +119,9 @@ class QubitRoutingEnv(gym.Env[NDArray, NDArray]):
 
     def _generate_circuit(self):
         self.circuit = self.circuit_generator.generate()
+        self._reset_dag()
+
+    def _reset_dag(self):
         self.dag = circuit_to_dag(self.circuit)
         self.routed_dag = self.dag.copy_empty_like()
 
@@ -170,7 +178,7 @@ class QubitRoutingEnv(gym.Env[NDArray, NDArray]):
         self.qubit_to_node[qubit_a], self.qubit_to_node[qubit_b] = node_b, node_a
 
     def _current_obs(self) -> NDArray:
-        obs = np.zeros(shape=self.observation_space.shape)
+        obs = np.zeros(shape=self.observation_space.shape, dtype=self.observation_space.dtype)
         edge_vector_idx = self.diameter + 1
 
         for qubit in range(self.num_qubits):
