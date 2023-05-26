@@ -47,7 +47,9 @@ class QubitRoutingEnv(gym.Env[NDArray, NDArray]):
         self.diameter = diameter
         self.max_degree = max_degree
 
-        self.observation_space = spaces.MultiDiscrete(np.full(diameter + max_degree + 2, num_qubits, dtype=np.int64))
+        self.observation_space = spaces.MultiDiscrete(
+            np.full(diameter + max_degree + 2, num_qubits + 1, dtype=np.int64)
+        )
         self.action_space = spaces.MultiBinary(coupling_map.num_edges())
 
         # State information
