@@ -101,6 +101,15 @@ class QubitRoutingEnv(gym.Env[NDArray, NDArray]):
 
         return self._current_obs(), {}
 
+    def action_masks(self) -> NDArray:
+        mask = np.ones(shape=(self.action_space.n, 2), dtype=bool)
+
+        for i, edge in enumerate(self.coupling_map.edge_list()):
+            if self.protected_nodes.intersection(edge):
+                mask[i, 1] = False
+
+        return mask
+
     def _generate_circuit(self):
         self.circuit = self.circuit_generator.generate()
         self.dag = circuit_to_dag(self.circuit)
