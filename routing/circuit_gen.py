@@ -18,7 +18,7 @@ class CircuitGenerator(ABC):
         raise NotImplementedError
 
 
-class Random(CircuitGenerator):
+class RandomCircuitGenerator(CircuitGenerator):
     def __init__(self, num_qubits: int, num_gates: int):
         super().__init__(num_qubits)
 
@@ -37,7 +37,7 @@ class Random(CircuitGenerator):
         return qc
 
 
-class LayeredRandom(CircuitGenerator):
+class LayeredRandomCircuitGenerator(CircuitGenerator):
     def __init__(self, num_qubits: int, num_layers: int = 1, density: float = 1.0):
         super().__init__(num_qubits)
 
