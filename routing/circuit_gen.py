@@ -1,18 +1,13 @@
 
 import random
 from abc import ABC, abstractmethod
+from typing import List
 
 import numpy as np
 from qiskit import QuantumCircuit
 
 
 class CircuitGenerator(ABC):
-    def __init__(self, num_qubits: int):
-        if num_qubits < 2:
-            raise ValueError(f'`num_qubits` must be greater or equal than 2, got {num_qubits}')
-
-        self.num_qubits = num_qubits
-
     @abstractmethod
     def generate(self) -> QuantumCircuit:
         raise NotImplementedError
@@ -20,11 +15,12 @@ class CircuitGenerator(ABC):
 
 class RandomCircuitGenerator(CircuitGenerator):
     def __init__(self, num_qubits: int, num_gates: int):
-        super().__init__(num_qubits)
-
+        if num_qubits < 2:
+            raise ValueError(f'Number of qubits must be greater or equal than 2, got {num_qubits}')
         if num_gates <= 0:
-            raise ValueError(f'`num_gates` must be positive, got {num_gates}')
+            raise ValueError(f'Number of gates must be positive, got {num_gates}')
 
+        self.num_qubits = num_qubits
         self.num_gates = num_gates
 
     def generate(self) -> QuantumCircuit:
@@ -39,14 +35,14 @@ class RandomCircuitGenerator(CircuitGenerator):
 
 class LayeredRandomCircuitGenerator(CircuitGenerator):
     def __init__(self, num_qubits: int, num_layers: int = 1, density: float = 1.0):
-        super().__init__(num_qubits)
-
+        if num_qubits < 2:
+            raise ValueError(f'Number of qubits must be greater or equal than 2, got {num_qubits}')
         if num_layers <= 0:
-            raise ValueError(f'`num_layers` must be positive, got {num_layers}')
-
+            raise ValueError(f'Number of layers must be positive, got {num_layers}')
         if not (0.0 <= density <= 1.0):
-            raise ValueError(f'`density` must be a value between 0 and 1, got {density}')
+            raise ValueError(f'Density must be a value between 0 and 1, got {density}')
 
+        self.num_qubits = num_qubits
         self.num_layers = num_layers
         self.density = density
 
@@ -62,3 +58,14 @@ class LayeredRandomCircuitGenerator(CircuitGenerator):
                 qc.cx(*selected[i:i + 2])
 
         return qc
+
+
+class DatasetCircuitGenerator(CircuitGenerator):
+    def __init__(self, dataset: List[QuantumCircuit]):
+        if not dataset:
+            raise ValueError('Dataset cannot be empty')
+
+        self.dataset = dataset
+
+    def generate(self) -> QuantumCircuit:
+        return random.choice(self.dataset)
