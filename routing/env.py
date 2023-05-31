@@ -167,15 +167,17 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         non_execution_penalty: float = -1.0,
         initial_mapping: Optional[NDArray] = None,
         training: bool = True,
+        allow_idle_action: bool = True,
     ):
         super().__init__(coupling_map, circuit_generator, gate_reward, initial_mapping, training)
 
         if depth <= 0:
-            raise ValueError(f'`depth` must be positive, got {depth}')
+            raise ValueError(f'Depth must be positive, got {depth}')
 
         self.termination_reward = termination_reward
         self.swap_penalty = swap_penalty
         self.non_execution_penalty = non_execution_penalty
+        self.allow_idle_action = allow_idle_action
 
         self.observation_space = spaces.Box(-1, self.num_qubits, (self.num_qubits, depth), dtype=Int32)
         self.action_space = spaces.Discrete(coupling_map.num_edges() + 1)
@@ -195,7 +197,7 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
             if self.protected_nodes.intersection(edge):
                 mask[i + 1] = False
 
-        if np.any(mask[1:]):
+        if not self.allow_idle_action and np.any(mask[1:]):
             mask[0] = False
 
         return mask
