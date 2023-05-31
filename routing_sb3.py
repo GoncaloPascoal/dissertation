@@ -4,8 +4,8 @@ from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
+from routing.env import LayeredRoutingEnv
 from routing.circuit_gen import RandomCircuitGenerator
-from routing.env import QubitRoutingEnv
 
 
 def main():
@@ -27,8 +27,8 @@ def main():
         rx.visualization.mpl_draw(g, with_labels=True)
         plt.show()
 
-    def env_fn() -> QubitRoutingEnv:
-        return QubitRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 64))
+    def env_fn() -> LayeredRoutingEnv:
+        return LayeredRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 64))
 
     vec_env = SubprocVecEnv([env_fn] * 8)
 
@@ -46,7 +46,7 @@ def main():
         model.learn(64 * 1024, progress_bar=True)
         model.save('m_routing.model')
 
-    env = QubitRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 64))
+    env = LayeredRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 64))
     obs, _ = env.reset()
     print(obs)
     print(env.circuit.depth())
