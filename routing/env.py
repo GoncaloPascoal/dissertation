@@ -1,4 +1,4 @@
-
+import itertools
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple, Dict, Any, Set, List, SupportsFloat
 
@@ -205,15 +205,26 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
     def _current_obs(self) -> QcpObsType:
         obs = np.full(self.observation_space.shape, -1, dtype=self.observation_space.dtype)
 
-        layers = dag_layers(self.dag)[:obs.shape[1]]
+        layer_idx = 0
+        layer_qubits = set()
 
-        for layer_idx, layer in enumerate(layers):
-            for op_node in layer:
-                if len(op_node.qargs) == 2:
-                    idx_a, idx_b = qubits_to_indices(self.circuit, op_node.qargs)
+        for op_node in self.dag.op_nodes(include_directives=False):
+            if len(op_node.qargs) == 2:
+                indices = qubits_to_indices(self.circuit, op_node.qargs)
 
-                    obs[idx_a, layer_idx] = idx_b
-                    obs[idx_b, layer_idx] = idx_a
+                if layer_qubits.intersection(indices):
+                    layer_qubits = set(indices)
+                    layer_idx += 1
+
+                    if layer_idx == obs.shape[1]:
+                        break
+                else:
+                    layer_qubits.update(indices)
+
+                idx_a, idx_b = indices
+
+                obs[idx_a, layer_idx] = idx_b
+                obs[idx_b, layer_idx] = idx_a
 
         mapped_obs = np.zeros(shape=obs.shape, dtype=obs.dtype)
 
