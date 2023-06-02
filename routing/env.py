@@ -22,7 +22,7 @@ from utils import qubits_to_indices, indices_to_qubits
 class RoutingEnv(gym.Env[ObsType, ActType], ABC):
     initial_mapping: Optional[NDArray]
     protected_nodes: Set[int]
-    gates_to_schedule: List[Tuple[DAGOpNode, List[int]]]
+    gates_to_schedule: List[Tuple[DAGOpNode, Tuple[int, ...]]]
 
     def __init__(
         self,
@@ -96,7 +96,8 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
             self.routed_dag.apply_operation_back(op_node.op, qargs)
             self.dag.remove_op_node(op_node)
 
-            reward += self.gate_reward
+            if len(nodes) == 2:
+                reward += self.gate_reward
 
         return reward
 
@@ -140,13 +141,12 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         self.gates_to_schedule = []
 
         for op_node in self.dag.front_layer():
-            if op_node.op.num_qubits == 2:
-                indices = qubits_to_indices(self.circuit, op_node.qargs)
-                nodes = [self.qubit_to_node[i] for i in indices]
+            indices = qubits_to_indices(self.circuit, op_node.qargs)
+            nodes = tuple(self.qubit_to_node[i] for i in indices)
 
-                if self.coupling_map.has_edge(nodes[0], nodes[1]):
-                    self.protected_nodes.update(nodes)
-                    self.gates_to_schedule.append((op_node, nodes))
+            if len(nodes) != 2 or self.coupling_map.has_edge(nodes[0], nodes[1]):
+                self.protected_nodes.update(nodes)
+                self.gates_to_schedule.append((op_node, nodes))
 
 
 QcpObsType = NDArray[Shape['*, *'], Int32]
@@ -209,10 +209,11 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
 
         for layer_idx, layer in enumerate(layers):
             for op_node in layer:
-                idx_a, idx_b = qubits_to_indices(self.circuit, op_node.qargs)
+                if len(op_node.qargs) == 2:
+                    idx_a, idx_b = qubits_to_indices(self.circuit, op_node.qargs)
 
-                obs[idx_a, layer_idx] = idx_b
-                obs[idx_b, layer_idx] = idx_a
+                    obs[idx_a, layer_idx] = idx_b
+                    obs[idx_b, layer_idx] = idx_a
 
         mapped_obs = np.zeros(shape=obs.shape, dtype=obs.dtype)
 

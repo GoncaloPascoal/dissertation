@@ -73,15 +73,19 @@ def main():
     print(f'Total reward: {total_reward:.2f}\n')
     routed_circuit = dag_to_circuit(env.routed_dag)
 
-    print(f'Routed depth: {routed_circuit.depth()} | {routed_circuit.depth() / env.circuit.depth():.3f}')
-    print(f'Routed instructions: {routed_circuit.count_ops()}\n')
+    print('[b blue]RL Routing[/b blue]')
+    print(f'Depth: {routed_circuit.depth()} | {routed_circuit.depth() / env.circuit.depth():.3f}')
+    print(f'Instructions: {routed_circuit.count_ops()}')
+    print(f'Depth after decomposition: {routed_circuit.decompose().depth()}\n')
 
     coupling_map = CouplingMap(g.to_directed().edge_list())
     t_qc = transpile(env.circuit, coupling_map=coupling_map, initial_layout=initial_layout,
                      routing_method=routing_method, basis_gates=['u', 'swap', 'cx'], optimization_level=0)
 
-    print(f'Transpiled depth: {t_qc.depth()} | {t_qc.depth() / env.circuit.depth():.3f}')
-    print(f'Transpiled instructions: {t_qc.count_ops()}')
+    print(f'[b blue]Qiskit Compiler ({routing_method} routing)[/b blue]')
+    print(f'Depth: {t_qc.depth()} | {t_qc.depth() / env.circuit.depth():.3f}')
+    print(f'Instructions: {t_qc.count_ops()}')
+    print(f'Depth after decomposition: {t_qc.decompose().depth()}')
 
 
 if __name__ == '__main__':
