@@ -5,6 +5,7 @@ qiskit-ibm-provider>=0.6
 scikit-optimize>=0.9
 rich>=13.3
 rustworkx>=0.12
+torch>=2.0
+stable-baselines3==2.0.0a10
 sb3-contrib==2.0.0a9
-stable-baselines3==2.0.0a9
 tqdm>=4.65
