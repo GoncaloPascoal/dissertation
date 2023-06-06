@@ -41,7 +41,7 @@ def main():
     vec_env = SubprocVecEnv([env_fn] * n_envs)
 
     try:
-        model = MaskablePPO.load('m_qcp_routing.model', vec_env)
+        model = MaskablePPO.load('m_qcp_routing.model', vec_env, tensorboard_log='routing_logs')
     except FileNotFoundError:
         policy_kwargs = {
             'net_arch': [64, 64, 96],
@@ -76,7 +76,10 @@ def main():
     print('[b blue]RL Routing[/b blue]')
     print(f'Depth: {routed_circuit.depth()} | {routed_circuit.depth() / env.circuit.depth():.3f}')
     print(f'Swaps: {routed_circuit.count_ops()["swap"]}')
-    print(f'Depth after decomposition: {routed_circuit.decompose().depth()}\n')
+
+    routed_circuit = routed_circuit.decompose()
+    print(f'CNOTs after decomposition: {routed_circuit.count_ops()["cx"]}')
+    print(f'Depth after decomposition: {routed_circuit.depth()}\n')
 
     coupling_map = CouplingMap(g.to_directed().edge_list())
     t_qc = transpile(env.circuit, coupling_map=coupling_map, initial_layout=initial_layout,
@@ -85,7 +88,10 @@ def main():
     print(f'[b blue]Qiskit Compiler ({routing_method} routing)[/b blue]')
     print(f'Depth: {t_qc.depth()} | {t_qc.depth() / env.circuit.depth():.3f}')
     print(f'Swaps: {t_qc.count_ops()["swap"]}')
-    print(f'Depth after decomposition: {t_qc.decompose().depth()}')
+
+    t_qc = t_qc.decompose()
+    print(f'CNOTs after decomposition: {t_qc.count_ops()["cx"]}')
+    print(f'Depth after decomposition: {t_qc.depth()}')
 
 
 if __name__ == '__main__':

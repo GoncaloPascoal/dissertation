@@ -1,4 +1,4 @@
-import itertools
+
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple, Dict, Any, Set, List, SupportsFloat
 
@@ -14,7 +14,6 @@ from qiskit.circuit.library import SwapGate, CXGate
 from qiskit.converters import circuit_to_dag
 from qiskit.dagcircuit import DAGOpNode
 
-from dag_utils import dag_layers
 from routing.circuit_gen import CircuitGenerator
 from utils import qubits_to_indices, indices_to_qubits
 
@@ -30,6 +29,7 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         circuit_generator: CircuitGenerator,
         gate_reward: float = 1.0,
         initial_mapping: Optional[NDArray] = None,
+        allow_bridge_gate: bool = True,
         training: bool = True,
     ):
         if initial_mapping is not None and initial_mapping.shape != (coupling_map.num_nodes(),):
@@ -39,9 +39,20 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         self.circuit_generator = circuit_generator
         self.gate_reward = gate_reward
         self.initial_mapping = initial_mapping
+        self.allow_bridge_gate = allow_bridge_gate
         self.training = training
 
         self.num_qubits = coupling_map.num_nodes()
+        self.num_edges = coupling_map.num_edges()
+        self.shortest_paths = rx.all_pairs_dijkstra_shortest_paths(coupling_map, lambda _: 1.0)
+        self.distance_matrix = rx.distance_matrix(coupling_map).astype(np.int32)
+
+        if self.allow_bridge_gate:
+            self.bridge_pairs = sorted(
+                (j, i) for i in range(self.num_qubits) for j in range(i) if self.distance_matrix[j, i] == 2
+            )
+        else:
+            self.bridge_pairs = []
 
         # State information
         self.node_to_qubit = np.zeros(self.num_qubits, dtype=np.int32)
@@ -53,10 +64,17 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         self.dag = circuit_to_dag(self.circuit)
         self.routed_dag = self.dag.copy_empty_like()
 
+        bridge_qc = QuantumCircuit(3)
+        for _ in range(2):
+            bridge_qc.cx(1, 2)
+            bridge_qc.cx(0, 1)
+
+        self.bridge_gate = bridge_qc.to_gate(label='BRIDGE')
+        self.bridge_gate.name = 'BRIDGE'
         self.swap_gate = SwapGate()
 
     def step(self, action: ActType) -> Tuple[ObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
-        reward = self._schedule_gates() + self._schedule_swaps(action)
+        reward = self._schedule_bridges(action) + self._schedule_gates() + self._schedule_swaps(action)
         return self._current_obs(), reward, self._terminated(), False, {}
 
     def reset(
@@ -81,6 +99,10 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def _schedule_bridges(self, action: ActType) -> float:
+        raise NotImplementedError
+
+    @abstractmethod
     def _schedule_swaps(self, action: ActType) -> float:
         raise NotImplementedError
 
@@ -100,6 +122,13 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
                 reward += self.gate_reward
 
         return reward
+
+    def _bridge(self, control: int, middle: int, target: int):
+        indices = (control, middle, target)
+        qargs = indices_to_qubits(self.circuit, indices)
+
+        self.routed_dag.apply_operation_back(self.bridge_gate, qargs)
+        self.protected_nodes.update(indices)
 
     def _swap(self, edge: Tuple[int, int]):
         qargs = indices_to_qubits(self.circuit, edge)
@@ -166,10 +195,11 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         swap_penalty: float = -3.0,
         non_execution_penalty: float = -1.0,
         initial_mapping: Optional[NDArray] = None,
+        allow_bridge_gate: bool = True,
         training: bool = True,
         allow_idle_action: bool = True,
     ):
-        super().__init__(coupling_map, circuit_generator, gate_reward, initial_mapping, training)
+        super().__init__(coupling_map, circuit_generator, gate_reward, initial_mapping, allow_bridge_gate, training)
 
         if depth <= 0:
             raise ValueError(f'Depth must be positive, got {depth}')
@@ -179,8 +209,10 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         self.non_execution_penalty = non_execution_penalty
         self.allow_idle_action = allow_idle_action
 
+        num_actions = 1 + self.num_edges + len(self.bridge_pairs)
+
         self.observation_space = spaces.Box(-1, self.num_qubits, (self.num_qubits, depth), dtype=Int32)
-        self.action_space = spaces.Discrete(coupling_map.num_edges() + 1)
+        self.action_space = spaces.Discrete(num_actions)
 
     def step(self, action: int) -> Tuple[QcpObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
         next_obs, reward, terminated, truncated, info = super().step(action)
@@ -193,9 +225,22 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
     def action_masks(self) -> NDArray:
         mask = np.ones(self.action_space.n, dtype=bool)
 
+        # Swap actions
         for i, edge in enumerate(self.coupling_map.edge_list()):
             if self.protected_nodes.intersection(edge):
                 mask[i + 1] = False
+
+        # Bridge actions
+        for i, pair in enumerate(self.bridge_pairs):
+            bridge_args = self._bridge_args(pair)
+
+            if bridge_args is None:
+                is_valid = False
+            else:
+                control, target = bridge_args[1]
+                is_valid = not bool(self.protected_nodes.intersection(self.shortest_paths[control][target]))
+
+            mask[i + self.num_edges + 1] = is_valid
 
         if not self.allow_idle_action and np.any(mask[1:]):
             mask[0] = False
@@ -233,10 +278,36 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
 
         return mapped_obs
 
+    def _bridge_args(self, pair: Tuple[int, int]) -> Optional[Tuple[DAGOpNode, Tuple[int, ...]]]:
+        for op_node in self.dag.front_layer():
+            if isinstance(op_node.op, CXGate):
+                indices = qubits_to_indices(self.circuit, op_node.qargs)
+                nodes = tuple(sorted(self.qubit_to_node[i] for i in indices))
+
+                if nodes == pair:
+                    return op_node, nodes
+
+        return None
+
+    def _schedule_bridges(self, action: int) -> float:
+        reward = 0.0
+
+        if action > self.num_edges:
+            pair = self.bridge_pairs[action - self.num_edges - 1]
+            bridge_args = self._bridge_args(pair)
+
+            if bridge_args is not None:
+                op_node, (control, target) = bridge_args
+                self._bridge(*self.shortest_paths[control][target])
+                self.dag.remove_op_node(op_node)
+                reward += self.gate_reward + self.swap_penalty
+
+        return reward
+
     def _schedule_swaps(self, action: int) -> float:
         reward = 0.0
 
-        if action != 0:
+        if 1 <= action <= self.num_edges:
             edge = self.coupling_map.edge_list()[action - 1]
             if self.protected_nodes.intersection(edge):
                 raise ValueError(f'Invalid action: cannot perform SWAP on edge {edge}')
@@ -263,16 +334,14 @@ class LayeredRoutingEnv(RoutingEnv[NDArray, NDArray]):
         gate_reward: float = 1.0,
         distance_reduction_reward: float = 0.1,
         initial_mapping: Optional[NDArray] = None,
+        allow_bridge_gate: bool = True,
         training: bool = True,
     ):
-        super().__init__(coupling_map, circuit_generator, gate_reward, initial_mapping, training)
+        super().__init__(coupling_map, circuit_generator, gate_reward, initial_mapping, allow_bridge_gate, training)
 
         self.distance_reduction_reward = distance_reduction_reward
 
-        self.shortest_paths = rx.all_pairs_dijkstra_shortest_paths(coupling_map, lambda e: 1.0)
-        self.distance_matrix = rx.distance_matrix(coupling_map)
-
-        self.diameter = int(np.max(self.distance_matrix))
+        self.diameter = np.max(self.distance_matrix)
         self.max_degree = max(coupling_map.degree(idx) for idx in coupling_map.node_indices())
 
         # State information
@@ -282,7 +351,7 @@ class LayeredRoutingEnv(RoutingEnv[NDArray, NDArray]):
         self.observation_space = spaces.MultiDiscrete(
             np.full(self.diameter + self.max_degree + 2, self.num_qubits + 1, dtype=np.int32)
         )
-        self.action_space = spaces.MultiBinary(coupling_map.num_edges())
+        self.action_space = spaces.MultiBinary(self.num_edges)
 
     def action_masks(self) -> NDArray:
         mask = np.ones(shape=(self.action_space.n, 2), dtype=bool)
@@ -304,7 +373,7 @@ class LayeredRoutingEnv(RoutingEnv[NDArray, NDArray]):
                 qubit_node = self.qubit_to_node[qubit]
                 target_node = self.qubit_to_node[target]
 
-                distance = int(self.distance_matrix[qubit_node, target_node])
+                distance = self.distance_matrix[qubit_node, target_node]
                 obs[distance] += 1
 
                 # Edge vector
@@ -320,6 +389,10 @@ class LayeredRoutingEnv(RoutingEnv[NDArray, NDArray]):
                 obs[edge_vector_idx + num_edges] += 1
 
         return obs
+
+    def _schedule_bridges(self, action: NDArray) -> float:
+        # TODO
+        return 0.0
 
     def _schedule_swaps(self, action: NDArray) -> float:
         reward = 0.0
@@ -373,6 +446,6 @@ class LayeredRoutingEnv(RoutingEnv[NDArray, NDArray]):
                 qubit_node = self.qubit_to_node[qubit]
                 target_node = self.qubit_to_node[target]
 
-                distances[qubit] = int(self.distance_matrix[qubit_node, target_node])
+                distances[qubit] = self.distance_matrix[qubit_node, target_node]
 
         return distances
