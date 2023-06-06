@@ -21,7 +21,7 @@ def main():
     show_topology = False
 
     n_envs = 6
-    n_iters = 1024
+    n_iters_per_env = 200
     n_steps = 1024
     depth = 8
 
@@ -51,7 +51,7 @@ def main():
                             tensorboard_log='routing_logs', learning_rate=5e-5)
 
     if learn:
-        model.learn(n_iters * n_steps, progress_bar=True)
+        model.learn(n_envs * n_iters_per_env * n_steps, progress_bar=True)
         model.save('m_qcp_routing.model')
 
     env = QcpRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 16), depth)
@@ -75,7 +75,7 @@ def main():
 
     print('[b blue]RL Routing[/b blue]')
     print(f'Depth: {routed_circuit.depth()} | {routed_circuit.depth() / env.circuit.depth():.3f}')
-    print(f'Instructions: {routed_circuit.count_ops()}')
+    print(f'Swaps: {routed_circuit.count_ops()["swap"]}')
     print(f'Depth after decomposition: {routed_circuit.decompose().depth()}\n')
 
     coupling_map = CouplingMap(g.to_directed().edge_list())
@@ -84,7 +84,7 @@ def main():
 
     print(f'[b blue]Qiskit Compiler ({routing_method} routing)[/b blue]')
     print(f'Depth: {t_qc.depth()} | {t_qc.depth() / env.circuit.depth():.3f}')
-    print(f'Instructions: {t_qc.count_ops()}')
+    print(f'Swaps: {t_qc.count_ops()["swap"]}')
     print(f'Depth after decomposition: {t_qc.decompose().depth()}')
 
 
