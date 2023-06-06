@@ -306,8 +306,9 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
 
     def _schedule_swaps(self, action: int) -> float:
         reward = 0.0
+        action_is_swap = 1 <= action <= self.num_edges
 
-        if 1 <= action <= self.num_edges:
+        if action_is_swap:
             edge = self.coupling_map.edge_list()[action - 1]
             if self.protected_nodes.intersection(edge):
                 raise ValueError(f'Invalid action: cannot perform SWAP on edge {edge}')
@@ -317,7 +318,7 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
 
         self._update_state()
 
-        if not self.gates_to_schedule:
+        if action_is_swap and not self.gates_to_schedule:
             reward += self.non_execution_penalty
 
         return reward
