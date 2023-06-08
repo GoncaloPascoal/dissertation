@@ -1,11 +1,11 @@
 
 import rustworkx as rx
 from sb3_contrib import MaskablePPO
-from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+from sb3_contrib.common.maskable.policies import MaskableMultiInputActorCriticPolicy
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
 from routing.circuit_gen import RandomCircuitGenerator
-from routing.env import QcpRoutingEnv
+from routing.env import QcpRoutingEnv, NoiseConfig
 
 
 def main():
@@ -17,26 +17,27 @@ def main():
     from qiskit import transpile
 
     # Parameters
-    learn = False
+    learn = True
     show_topology = False
 
     n_envs = 6
     n_iters_per_env = 200
     n_steps = 1024
     depth = 8
+    noise_config = NoiseConfig(1e-2, 3e-3)
 
-    routing_method = 'basic'
+    routing_method = 'sabre'
 
     g = rx.PyGraph()
-    g.add_nodes_from([0, 1, 2, 3, 4, 5, 6, 7])
-    g.add_edges_from_no_data([(0, 1), (0, 4), (1, 2), (1, 5), (2, 3), (2, 6), (3, 7), (4, 5), (5, 6), (6, 7)])
+    g.add_nodes_from([0, 1, 2, 3, 4])
+    g.add_edges_from_no_data([(0, 1), (1, 2), (1, 3), (3, 4)])
 
     if show_topology:
         rx.visualization.mpl_draw(g, with_labels=True)
         plt.show()
 
     def env_fn() -> QcpRoutingEnv:
-        return QcpRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 16), depth)
+        return QcpRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 16), depth, noise_config=noise_config)
 
     vec_env = SubprocVecEnv([env_fn] * n_envs)
 
@@ -47,14 +48,14 @@ def main():
             'net_arch': [64, 64, 96],
         }
 
-        model = MaskablePPO(MaskableActorCriticPolicy, vec_env, policy_kwargs=policy_kwargs, n_steps=n_steps,
+        model = MaskablePPO(MaskableMultiInputActorCriticPolicy, vec_env, policy_kwargs=policy_kwargs, n_steps=n_steps,
                             tensorboard_log='routing_logs', learning_rate=5e-5)
 
     if learn:
         model.learn(n_envs * n_iters_per_env * n_steps, progress_bar=True)
         model.save('m_qcp_routing.model')
 
-    env = QcpRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 16), depth)
+    env = env_fn()
     obs, _ = env.reset()
 
     initial_layout = env.qubit_to_node.copy().tolist()

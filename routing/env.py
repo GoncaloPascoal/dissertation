@@ -1,5 +1,6 @@
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Optional, Tuple, Dict, Any, Set, List, SupportsFloat
 
 import gymnasium as gym
@@ -7,7 +8,7 @@ import numpy as np
 import rustworkx as rx
 from gymnasium import spaces
 from gymnasium.core import ObsType, ActType
-from nptyping import NDArray, Shape, Int32
+from nptyping import NDArray, Int32
 from qiskit import QuantumCircuit
 from qiskit.circuit import Clbit
 from qiskit.circuit.library import SwapGate, CXGate
@@ -68,7 +69,6 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         self.circuit = QuantumCircuit(self.num_qubits)
         self.dag = circuit_to_dag(self.circuit)
         self.routed_dag = self.dag.copy_empty_like()
-        self.iter = 0
 
         bridge_qc = QuantumCircuit(3)
         for _ in range(2):
@@ -76,8 +76,11 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
             bridge_qc.cx(0, 1)
 
         self.bridge_gate = bridge_qc.to_gate(label='BRIDGE')
-        self.bridge_gate.name = 'BRIDGE'
+        self.bridge_gate.name = 'bridge'
         self.swap_gate = SwapGate()
+
+        self.iter = 0
+        self.rng = np.random.default_rng()
 
     def step(self, action: ActType) -> Tuple[ObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
         reward = self._schedule_bridges(action) + self._schedule_gates() + self._schedule_swaps(action)
@@ -90,14 +93,11 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         options: Optional[Dict[str, Any]] = None,
     ) -> Tuple[ObsType, Dict[str, Any]]:
         if self.training and self.iter == 0:
-            self._generate_circuit()
-        else:
-            self._reset_dag()
+            if self.iter == 0:
+                self.circuit = self.circuit_generator.generate()
+            self.iter = (self.iter + 1) % self.training_iterations
 
-        if self.training:
-            self.iter += 1
-            if self.iter == self.training_iterations:
-                self.iter = 0
+        self._reset_dag()
 
         return self._current_obs(), {}
 
@@ -154,10 +154,6 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         self.node_to_qubit[node_a], self.node_to_qubit[node_b] = qubit_b, qubit_a
         self.qubit_to_node[qubit_a], self.qubit_to_node[qubit_b] = node_b, node_a
 
-    def _generate_circuit(self):
-        self.circuit = self.circuit_generator.generate()
-        self._reset_dag()
-
     def _reset_dag(self):
         self.dag = circuit_to_dag(self.circuit)
         self.routed_dag = self.dag.copy_empty_like()
@@ -189,11 +185,18 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
                 self.gates_to_schedule.append((op_node, nodes))
 
 
-QcpObsType = NDArray[Shape['*, *'], Int32]
+@dataclass
+class NoiseConfig:
+    mean: float
+    std: float
+    recalibration_interval: int = 16
+
+
+QcpObsType = Dict[str, NDArray]
 
 
 class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
-    observation_space: spaces.Box
+    observation_space: spaces.Dict
     action_space: spaces.Discrete
 
     def __init__(
@@ -210,6 +213,7 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         training: bool = True,
         training_iterations: int = 1,
         allow_idle_action: bool = True,
+        noise_config: Optional[NoiseConfig] = None,
     ):
         super().__init__(coupling_map, circuit_generator, gate_reward, initial_mapping, allow_bridge_gate, training,
                          training_iterations)
@@ -221,11 +225,38 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         self.swap_penalty = swap_penalty
         self.non_execution_penalty = non_execution_penalty
         self.allow_idle_action = allow_idle_action
+        self.noise_config = noise_config
+
+        self.circuit_iter = 0
+        self.log_reliabilities = np.zeros(self.num_edges)
+
+        obs_spaces = {
+            'circuit': spaces.Box(-1, self.num_qubits, (self.num_qubits, depth), dtype=Int32),
+        }
+
+        if self.noise_config:
+            obs_spaces['log_reliabilities'] = spaces.Box(0.0, np.inf, shape=self.log_reliabilities.shape)
 
         num_actions = 1 + self.num_edges + len(self.bridge_pairs)
 
-        self.observation_space = spaces.Box(-1, self.num_qubits, (self.num_qubits, depth), dtype=Int32)
+        self.observation_space = spaces.Dict(obs_spaces)
         self.action_space = spaces.Discrete(num_actions)
+
+    def reset(
+        self,
+        *,
+        seed: Optional[int] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[QcpObsType, Dict[str, Any]]:
+        result = super().reset(seed=seed, options=options)
+
+        if self.noise_config and self.training:
+            if self.circuit_iter == 0:
+                self._recalibrate()
+
+            self.circuit_iter = (self.circuit_iter + 1) % self.noise_config.recalibration_interval
+
+        return result
 
     def step(self, action: int) -> Tuple[QcpObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
         next_obs, reward, terminated, truncated, info = super().step(action)
@@ -261,7 +292,8 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         return mask
 
     def _current_obs(self) -> QcpObsType:
-        obs = np.full(self.observation_space.shape, -1, dtype=self.observation_space.dtype)
+        space_circuit = self.observation_space.spaces['circuit']
+        circuit = np.full(space_circuit.shape, -1, dtype=space_circuit.dtype)
 
         layer_idx = 0
         layer_qubits = set()
@@ -274,22 +306,33 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
                     layer_qubits = set(indices)
                     layer_idx += 1
 
-                    if layer_idx == obs.shape[1]:
+                    if layer_idx == circuit.shape[1]:
                         break
                 else:
                     layer_qubits.update(indices)
 
                 idx_a, idx_b = indices
 
-                obs[idx_a, layer_idx] = idx_b
-                obs[idx_b, layer_idx] = idx_a
+                circuit[idx_a, layer_idx] = idx_b
+                circuit[idx_b, layer_idx] = idx_a
 
-        mapped_obs = np.zeros(shape=obs.shape, dtype=obs.dtype)
+        mapped_circuit = np.zeros(shape=circuit.shape, dtype=circuit.dtype)
 
         for q in range(self.num_qubits):
-            mapped_obs[q] = obs[self.node_to_qubit[q]]
+            mapped_circuit[q] = circuit[self.node_to_qubit[q]]
 
-        return mapped_obs
+        obs = {'circuit': mapped_circuit}
+        if self.noise_config:
+            obs['log_reliabilities'] = self.log_reliabilities.copy()
+
+        return obs
+
+    def _recalibrate(self):
+        error_rates = np.clip(
+            self.rng.normal(self.noise_config.mean, self.noise_config.std, self.num_edges), 0.0, 1.0
+        )
+
+        self.log_reliabilities = np.clip(np.where(error_rates > 0.0, -np.log(error_rates), np.inf), None, 300.0)
 
     def _bridge_args(self, pair: Tuple[int, int]) -> Optional[Tuple[DAGOpNode, Tuple[int, ...]]]:
         for op_node in self.dag.front_layer():
