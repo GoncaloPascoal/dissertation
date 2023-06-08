@@ -31,9 +31,13 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         initial_mapping: Optional[NDArray] = None,
         allow_bridge_gate: bool = True,
         training: bool = True,
+        training_iterations: int = 1,
     ):
         if initial_mapping is not None and initial_mapping.shape != (coupling_map.num_nodes(),):
             raise ValueError('Initial mapping has invalid shape for the provided coupling map')
+
+        if training_iterations < 1:
+            raise ValueError(f'Number of training iterations must be greater than zero, got {training_iterations}')
 
         self.coupling_map = coupling_map
         self.circuit_generator = circuit_generator
@@ -41,6 +45,7 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         self.initial_mapping = initial_mapping
         self.allow_bridge_gate = allow_bridge_gate
         self.training = training
+        self.training_iterations = training_iterations
 
         self.num_qubits = coupling_map.num_nodes()
         self.num_edges = coupling_map.num_edges()
@@ -63,6 +68,7 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         self.circuit = QuantumCircuit(self.num_qubits)
         self.dag = circuit_to_dag(self.circuit)
         self.routed_dag = self.dag.copy_empty_like()
+        self.iter = 0
 
         bridge_qc = QuantumCircuit(3)
         for _ in range(2):
@@ -83,10 +89,15 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         seed: Optional[int] = None,
         options: Optional[Dict[str, Any]] = None,
     ) -> Tuple[ObsType, Dict[str, Any]]:
-        if self.training:
+        if self.training and self.iter == 0:
             self._generate_circuit()
         else:
             self._reset_dag()
+
+        if self.training:
+            self.iter += 1
+            if self.iter == self.training_iterations:
+                self.iter = 0
 
         return self._current_obs(), {}
 
@@ -197,9 +208,11 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         initial_mapping: Optional[NDArray] = None,
         allow_bridge_gate: bool = True,
         training: bool = True,
+        training_iterations: int = 1,
         allow_idle_action: bool = True,
     ):
-        super().__init__(coupling_map, circuit_generator, gate_reward, initial_mapping, allow_bridge_gate, training)
+        super().__init__(coupling_map, circuit_generator, gate_reward, initial_mapping, allow_bridge_gate, training,
+                         training_iterations)
 
         if depth <= 0:
             raise ValueError(f'Depth must be positive, got {depth}')
@@ -337,8 +350,10 @@ class LayeredRoutingEnv(RoutingEnv[NDArray, NDArray]):
         initial_mapping: Optional[NDArray] = None,
         allow_bridge_gate: bool = True,
         training: bool = True,
+        training_iterations: int = 1,
     ):
-        super().__init__(coupling_map, circuit_generator, gate_reward, initial_mapping, allow_bridge_gate, training)
+        super().__init__(coupling_map, circuit_generator, gate_reward, initial_mapping, allow_bridge_gate, training,
+                         training_iterations)
 
         self.distance_reduction_reward = distance_reduction_reward
 
