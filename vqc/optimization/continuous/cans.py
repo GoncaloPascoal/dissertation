@@ -9,7 +9,7 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.providers import Backend
 from qiskit_aer import AerSimulator
 
-from hst import HilbertSchmidt, LocalHilbertSchmidt, cost_hst_weighted
+from vqc.hst import HilbertSchmidt, LocalHilbertSchmidt, cost_hst_weighted
 from utils import ContinuousOptimizationResult
 
 

@@ -9,9 +9,9 @@ import numpy as np
 from qiskit import QuantumCircuit
 from rich.logging import RichHandler
 
-from parameter_generator import ParameterGenerator
+from vqc.parameter_generator import ParameterGenerator
 from vqc.optimization.continuous.gradient_based import gradient_based_hst_weighted
-from rl import NativeInstruction
+from vqc.rl import NativeInstruction
 from utils import create_native_instruction_dict, ContinuousOptimizationFunction
 
 
