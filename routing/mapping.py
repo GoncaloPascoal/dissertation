@@ -164,12 +164,13 @@ def initial_mapping_and_routing(
     env: RoutingEnv,
     *,
     population_size: int = 40,
+    cross_over_rate: float = 1.0,
     mutation_probability: float = 0.1,
 ) -> GeneticAlgorithm:
     problem = InitialMappingProblem(model, env)
 
     operators = [
-        OrderedCrossOver(problem, tournament_size=4),
+        OrderedCrossOver(problem, tournament_size=4, cross_over_rate=cross_over_rate),
         SwapMutation(problem, mutation_probability=mutation_probability),
     ]
 
@@ -195,7 +196,7 @@ def main():
     g.add_edges_from_no_data([(0, 1), (1, 2), (1, 3), (3, 4)])
     noise_config = NoiseConfig(1e-2, 3e-3, log_base=2)
 
-    env = QcpRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 64), 8,
+    env = QcpRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 16), 8,
                         training_iterations=4, noise_config=noise_config, termination_reward=0.0)
     model = MaskablePPO.load('models/m_qcp_routing.model', env, tensorboard_log='logs/routing')
 

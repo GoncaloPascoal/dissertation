@@ -24,41 +24,42 @@ from utils import qubits_to_indices
 def main():
     parser = ArgumentParser(
         'qcp_routing',
-        description='Quantum circuit placement with deep reinforcement learning',
+        description='Qubit routing with deep reinforcement learning',
     )
 
-    parser.add_argument('-l', '--learn', action='store_true', )
-    parser.add_argument('-m', '--model', metavar='M', help='model name')
-    parser.add_argument('-i', '--iters', metavar='I', help='iterations per environment', default=100)
+    parser.add_argument('-l', '--learn', action='store_true', help='whether or not to train the agent')
+    parser.add_argument('-m', '--model', metavar='M', help='name of the model')
+    parser.add_argument('-i', '--iters', metavar='I', help='iterations per environment', default=100, type=int)
     parser.add_argument('-r', '--routing-method', choices=['basic', 'stochastic', 'sabre'],
                         help='routing method for Qiskit compiler', default='sabre')
+    parser.add_argument('-d', '--depth', help='depth of circuit observations', default=8, type=int)
+    parser.add_argument('-e', '--envs', help='number of enviroments (for vectorization)',
+                        default=multiprocessing.cpu_count(), type=int)
+    parser.add_argument('--show-topology', action='store_true', help='show circuit topology')
 
     args = parser.parse_args()
     args.model_path = f'models/{args.model}.model'
 
     # Parameters
-    show_topology = False
-    n_envs = multiprocessing.cpu_count()
     n_steps = 1024
-
-    depth = 8
     training_iterations = 4
-    noise_config = NoiseConfig(1e-2, 3e-3, log_base=2)
+    noise_config = NoiseConfig(1.0e-2, 3.0e-3, log_base=2.0)
 
     g = rx.PyGraph()
     g.add_nodes_from([0, 1, 2, 3, 4])
     g.add_edges_from_no_data([(0, 1), (1, 2), (1, 3), (3, 4)])
 
-    if show_topology:
+    circuit_generator = RandomCircuitGenerator(g.num_nodes(), 16)
+
+    if args.show_topology:
         rx.visualization.mpl_draw(g, with_labels=True)
         plt.show()
 
     def env_fn() -> QcpRoutingEnv:
-        return QcpRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 32), depth,
-                             training_iterations=training_iterations, noise_config=noise_config,
-                             termination_reward=0.0)
+        return QcpRoutingEnv(g, circuit_generator, args.depth, training_iterations=training_iterations,
+                             noise_config=noise_config, termination_reward=0.0)
 
-    vec_env = VecMonitor(SubprocVecEnv([env_fn] * n_envs))
+    vec_env = VecMonitor(SubprocVecEnv([env_fn] * args.envs))
 
     try:
         model = MaskablePPO.load(args.model_path, vec_env, tensorboard_log='logs/routing')
@@ -74,7 +75,7 @@ def main():
         reset = True
 
     if args.learn:
-        model.learn(n_envs * args.iters * n_steps, progress_bar=True, tb_log_name='ppo',
+        model.learn(args.envs * args.iters * n_steps, progress_bar=True, tb_log_name='ppo',
                     reset_num_timesteps=reset)
         model.save(args.model_path)
 
