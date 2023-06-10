@@ -2,41 +2,48 @@
 import functools
 import multiprocessing
 import operator
+from argparse import ArgumentParser
 
+import matplotlib.pyplot as plt
 import rustworkx as rx
 import torch.nn as nn
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit, transpile
+from qiskit.converters import dag_to_circuit
+from qiskit.transpiler import CouplingMap
+from rich import print
+from rustworkx.visualization import mpl_draw
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableMultiInputActorCriticPolicy
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 
 from routing.circuit_gen import RandomCircuitGenerator
 from routing.env import QcpRoutingEnv, NoiseConfig
+from utils import qubits_to_indices
 
 
 def main():
-    from rich import print
-    from rustworkx.visualization import mpl_draw
-    import matplotlib.pyplot as plt
-    from qiskit.converters import dag_to_circuit
-    from qiskit.transpiler import CouplingMap
-    from qiskit import transpile
+    parser = ArgumentParser(
+        'qcp_routing',
+        description='Quantum circuit placement with deep reinforcement learning',
+    )
 
-    from utils import qubits_to_indices
+    parser.add_argument('-l', '--learn', action='store_true', )
+    parser.add_argument('-m', '--model', metavar='M', help='model name')
+    parser.add_argument('-i', '--iters', metavar='I', help='iterations per environment', default=100)
+    parser.add_argument('-r', '--routing-method', choices=['basic', 'stochastic', 'sabre'],
+                        help='routing method for Qiskit compiler', default='sabre')
+
+    args = parser.parse_args()
+    args.model_path = f'models/{args.model}.model'
 
     # Parameters
-    learn = False
     show_topology = False
-
     n_envs = multiprocessing.cpu_count()
-    n_iters_per_env = 100
     n_steps = 1024
 
     depth = 8
     training_iterations = 4
     noise_config = NoiseConfig(1e-2, 3e-3, log_base=2)
-
-    routing_method = 'sabre'
 
     g = rx.PyGraph()
     g.add_nodes_from([0, 1, 2, 3, 4])
@@ -54,7 +61,7 @@ def main():
     vec_env = VecMonitor(SubprocVecEnv([env_fn] * n_envs))
 
     try:
-        model = MaskablePPO.load('models/m_qcp_routing3.model', vec_env, tensorboard_log='logs/routing')
+        model = MaskablePPO.load(args.model_path, vec_env, tensorboard_log='logs/routing')
         reset = False
     except FileNotFoundError:
         policy_kwargs = {
@@ -66,10 +73,10 @@ def main():
                             tensorboard_log='logs/routing', learning_rate=5e-5)
         reset = True
 
-    if learn:
-        model.learn(n_envs * n_iters_per_env * n_steps, progress_bar=True, tb_log_name='ppo',
+    if args.learn:
+        model.learn(n_envs * args.iters * n_steps, progress_bar=True, tb_log_name='ppo',
                     reset_num_timesteps=reset)
-        model.save('models/m_qcp_routing.model')
+        model.save(args.model_path)
 
     env = env_fn()
     obs, _ = env.reset()
@@ -114,9 +121,9 @@ def main():
 
     coupling_map = CouplingMap(g.to_directed().edge_list())
     t_qc = transpile(env.circuit, coupling_map=coupling_map, initial_layout=initial_layout,
-                     routing_method=routing_method, basis_gates=['u', 'swap', 'cx'], optimization_level=0)
+                     routing_method=args.routing_method, basis_gates=['u', 'swap', 'cx'], optimization_level=0)
 
-    print(f'[b blue]Qiskit Compiler ({routing_method} routing)[/b blue]')
+    print(f'[b blue]Qiskit Compiler ({args.routing_method} routing)[/b blue]')
     print(f'Swaps: {t_qc.count_ops().get("swap", 0)}')
 
     t_qc = t_qc.decompose()
