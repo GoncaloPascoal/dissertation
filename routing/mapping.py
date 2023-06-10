@@ -188,13 +188,16 @@ def main():
 
     from routing.env import QcpRoutingEnv
     from routing.circuit_gen import RandomCircuitGenerator
+    from routing.env import NoiseConfig
 
     g = rx.PyGraph()
     g.add_nodes_from([0, 1, 2, 3, 4])
     g.add_edges_from_no_data([(0, 1), (1, 2), (1, 3), (3, 4)])
+    noise_config = NoiseConfig(1e-2, 3e-3, log_base=2)
 
-    env = QcpRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 128), 8)
-    model = MaskablePPO.load('m_qcp_routing.model', env, tensorboard_log='routing_logs')
+    env = QcpRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 64), 8,
+                        training_iterations=4, noise_config=noise_config, termination_reward=0.0)
+    model = MaskablePPO.load('models/m_qcp_routing.model', env, tensorboard_log='logs/routing')
 
     ga = initial_mapping_and_routing(model, env)
     ga.run(10)
@@ -215,13 +218,14 @@ def main():
     layout_method = 'sabre'
     routing_method = 'sabre'
 
-    print(f'Total reward: {total_reward:.2f}\n')
+    print(f'Total reward: {total_reward:.3f}\n')
     routed_circuit = dag_to_circuit(env.routed_dag)
 
     print('[b blue]RL Routing[/b blue]')
     print(f'Layout: {env.initial_mapping.tolist()}')
-    print(f'Depth: {routed_circuit.depth()} | {routed_circuit.depth() / env.circuit.depth():.3f}')
-    print(f'Swaps: {routed_circuit.count_ops()["swap"]}')
+    print(f'Swaps: {routed_circuit.count_ops().get("swap", 0)}')
+    if env.allow_bridge_gate:
+        print(f'Bridges: {routed_circuit.count_ops().get("bridge", 0)}')
 
     routed_circuit = routed_circuit.decompose()
     print(f'CNOTs after decomposition: {routed_circuit.count_ops()["cx"]}')
@@ -232,9 +236,8 @@ def main():
                      routing_method=routing_method, basis_gates=['u', 'swap', 'cx'], optimization_level=0)
 
     print(f'[b blue]Qiskit Compiler ({routing_method} routing)[/b blue]')
-    print(f'Layout: {t_qc.layout.initial_layout.get_virtual_bits().values()}')
-    print(f'Depth: {t_qc.depth()} | {t_qc.depth() / env.circuit.depth():.3f}')
-    print(f'Swaps: {t_qc.count_ops()["swap"]}')
+    print(f'Layout: {list(t_qc.layout.initial_layout.get_virtual_bits().values())}')
+    print(f'Swaps: {t_qc.count_ops().get("swap", 0)}')
 
     t_qc = t_qc.decompose()
     print(f'CNOTs after decomposition: {t_qc.count_ops()["cx"]}')

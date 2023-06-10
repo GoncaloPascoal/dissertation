@@ -1,6 +1,7 @@
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from math import e
 from typing import Optional, Tuple, Dict, Any, Set, List, SupportsFloat
 
 import gymnasium as gym
@@ -120,6 +121,9 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
     def _terminated(self) -> bool:
         return not self.dag.op_nodes(include_directives=False)
 
+    def _calculate_gate_reward(self, edge: Tuple[int, int]) -> float:
+        return self.gate_reward
+
     def _schedule_gates(self) -> float:
         reward = 0.0
 
@@ -130,7 +134,7 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
             self.dag.remove_op_node(op_node)
 
             if len(nodes) == 2:
-                reward += self.gate_reward
+                reward += self._calculate_gate_reward(nodes)  # type: ignore
 
         return reward
 
@@ -189,13 +193,18 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
 class NoiseConfig:
     mean: float
     std: float
-    recalibration_interval: int = 16
+
+    recalibration_interval: int = field(default=16, kw_only=True)
+    min_log_reliability: float = field(default=-100, kw_only=True)
+    log_base: float = field(default=e, kw_only=True)
 
 
 QcpObsType = Dict[str, NDArray]
 
 
 class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
+    log_reliabilities_map = Dict[Tuple[int, int], float]
+
     observation_space: spaces.Dict
     action_space: spaces.Discrete
 
@@ -228,14 +237,16 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         self.noise_config = noise_config
 
         self.circuit_iter = 0
+        self.error_rates = np.zeros(self.num_edges)
         self.log_reliabilities = np.zeros(self.num_edges)
+        self.log_reliabilities_map = {}
 
         obs_spaces = {
             'circuit': spaces.Box(-1, self.num_qubits, (self.num_qubits, depth), dtype=Int32),
         }
 
-        if self.noise_config:
-            obs_spaces['log_reliabilities'] = spaces.Box(0.0, np.inf, shape=self.log_reliabilities.shape)
+        if self.noise_aware:
+            obs_spaces['log_reliabilities'] = spaces.Box(-100.0, 0.0, shape=self.log_reliabilities.shape)
 
         num_actions = 1 + self.num_edges + len(self.bridge_pairs)
 
@@ -248,15 +259,15 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         seed: Optional[int] = None,
         options: Optional[Dict[str, Any]] = None,
     ) -> Tuple[QcpObsType, Dict[str, Any]]:
-        result = super().reset(seed=seed, options=options)
+        _, info = super().reset(seed=seed, options=options)
 
-        if self.noise_config and self.training:
+        if self.noise_aware and self.training:
             if self.circuit_iter == 0:
                 self._recalibrate()
 
             self.circuit_iter = (self.circuit_iter + 1) % self.noise_config.recalibration_interval
 
-        return result
+        return self._current_obs(), info
 
     def step(self, action: int) -> Tuple[QcpObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
         next_obs, reward, terminated, truncated, info = super().step(action)
@@ -291,6 +302,30 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
 
         return mask
 
+    @property
+    def noise_aware(self) -> bool:
+        return self.noise_config is not None
+
+    def calibrate(self, error_rates: NDArray):
+        self.error_rates = error_rates.clip(0.0, 1.0)
+
+        self.log_reliabilities = np.clip(
+            np.where(
+                error_rates < 1.0,
+                np.emath.logn(self.noise_config.log_base, 1.0 - error_rates),
+                -np.inf
+            ),
+            self.noise_config.min_log_reliability,
+            None,
+        )
+
+        m = {}
+        for edge, value in zip(self.coupling_map.edge_list(), self.log_reliabilities):
+            m[edge] = value
+            m[edge[::-1]] = value
+
+        self.log_reliabilities_map = m
+
     def _current_obs(self) -> QcpObsType:
         space_circuit = self.observation_space.spaces['circuit']
         circuit = np.full(space_circuit.shape, -1, dtype=space_circuit.dtype)
@@ -322,17 +357,13 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
             mapped_circuit[q] = circuit[self.node_to_qubit[q]]
 
         obs = {'circuit': mapped_circuit}
-        if self.noise_config:
+        if self.noise_aware:
             obs['log_reliabilities'] = self.log_reliabilities.copy()
 
         return obs
 
     def _recalibrate(self):
-        error_rates = np.clip(
-            self.rng.normal(self.noise_config.mean, self.noise_config.std, self.num_edges), 0.0, 1.0
-        )
-
-        self.log_reliabilities = np.clip(np.where(error_rates > 0.0, -np.log(error_rates), np.inf), None, 300.0)
+        self.calibrate(self.rng.normal(self.noise_config.mean, self.noise_config.std, self.num_edges))
 
     def _bridge_args(self, pair: Tuple[int, int]) -> Optional[Tuple[DAGOpNode, Tuple[int, ...]]]:
         for op_node in self.dag.front_layer():
@@ -354,28 +385,57 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
 
             if bridge_args is not None:
                 op_node, (control, target) = bridge_args
-                self._bridge(*self.shortest_paths[control][target])
+                nodes = self.shortest_paths[control][target]
+
+                self._bridge(*nodes)
                 self.dag.remove_op_node(op_node)
-                reward += self.gate_reward + self.swap_penalty
+                reward += self._calculate_bridge_reward(*nodes)
 
         return reward
 
+    def _calculate_bridge_reward(self, control: int, middle: int, target: int) -> float:
+        if self.noise_aware:
+            return 2.0 * (
+                self.log_reliabilities_map[(middle, target)] +
+                self.log_reliabilities_map[(control, middle)]
+            )
+        else:
+            return self.swap_penalty + self.gate_reward
+
+    def _calculate_gate_reward(self, edge: Tuple[int, int]) -> float:
+        if self.noise_aware:
+            return self.log_reliabilities_map[edge]
+        else:
+            return self.gate_reward
+
+    def _calculate_swap_reward(self, edge: Tuple[int, int]) -> float:
+        if self.noise_aware:
+            return 3.0 * self.log_reliabilities_map[edge]
+        else:
+            return self.swap_penalty
+
+    def _calculate_non_execution_reward(self) -> float:
+        if self.noise_aware:
+            return np.mean(self.log_reliabilities).item()
+        else:
+            return self.non_execution_penalty
+
     def _schedule_swaps(self, action: int) -> float:
         reward = 0.0
-        action_is_swap = 1 <= action <= self.num_edges
 
-        if action_is_swap:
+        if 1 <= action <= self.num_edges:
             edge = self.coupling_map.edge_list()[action - 1]
             if self.protected_nodes.intersection(edge):
                 raise ValueError(f'Invalid action: cannot perform SWAP on edge {edge}')
 
-            reward += self.swap_penalty
+            reward += self._calculate_swap_reward(edge)
             self._swap(edge)
 
         self._update_state()
 
-        if action_is_swap and not self.gates_to_schedule:
-            reward += self.non_execution_penalty
+        # If not a bridge action and no two-qubit gates to schedule, issue a non execution penalty
+        if action <= self.num_edges and not any(len(nodes) == 2 for _, nodes in self.gates_to_schedule):
+            reward += self._calculate_non_execution_reward()
 
         return reward
 
