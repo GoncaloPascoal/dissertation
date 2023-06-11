@@ -71,14 +71,14 @@ def main():
     parser.add_argument('-d', '--depth', help='depth of circuit observations', default=8, type=int)
     parser.add_argument('-e', '--envs', help='number of environments (for vectorization)',
                         default=multiprocessing.cpu_count(), type=int)
-    parser.add_argument('-i', '--iters', help='routing iterations for evaluation', default=10, type=int)
+    parser.add_argument('-i', '--iters', metavar='I', help='routing iterations for evaluation', default=10, type=int)
     parser.add_argument('--show-topology', action='store_true', help='show circuit topology')
 
     args = parser.parse_args()
     args.model_path = f'models/{args.model}.model'
 
     # Parameters
-    n_steps = 1024
+    n_steps = 2048
     training_iterations = 4
     noise_config = NoiseConfig(1.0e-2, 3.0e-3, log_base=2.0)
 
@@ -133,12 +133,11 @@ def main():
         ])
 
     initial_layout = env.qubit_to_node.copy().tolist()
-    print(f'Initial depth: {env.circuit.depth()}')
 
     best_reward = -inf
     routed_circuit = env.circuit.copy_empty_like()
 
-    for _ in range(args.iters):
+    for i in range(args.iters):
         terminated = False
         total_reward = 0.0
 
@@ -153,8 +152,11 @@ def main():
             best_reward = total_reward
             routed_circuit = dag_to_circuit(env.routed_dag)
 
+            print(f'Increased best reward to {best_reward:.3f} in iteration [yellow]{i + 1}[/yellow]')
+
         obs, _ = env.reset()
 
+    print(f'\nInitial depth: {env.circuit.depth()}')
     print(f'Total reward: {best_reward:.3f}\n')
 
     print('[b blue]RL Routing[/b blue]')
