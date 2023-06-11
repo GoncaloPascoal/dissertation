@@ -3,6 +3,7 @@ import functools
 import multiprocessing
 import operator
 from argparse import ArgumentParser
+from math import inf
 
 import matplotlib.pyplot as plt
 import rustworkx as rx
@@ -19,6 +20,24 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from routing.circuit_gen import RandomCircuitGenerator
 from routing.env import QcpRoutingEnv, NoiseConfig
 from utils import qubits_to_indices
+
+
+def t_topology() -> rx.PyGraph:
+    g = rx.PyGraph()
+
+    g.add_nodes_from(range(5))
+    g.add_edges_from_no_data([(0, 1), (1, 2), (1, 3), (3, 4)])
+
+    return g
+
+
+def h_topology() -> rx.PyGraph:
+    g = rx.PyGraph()
+
+    g.add_nodes_from(range(7))
+    g.add_edges_from_no_data([(0, 1), (1, 2), (1, 3), (3, 5), (4, 5), (5, 6)])
+
+    return g
 
 
 def grid_topology(rows: int, cols: int) -> rx.PyGraph:
@@ -45,12 +64,14 @@ def main():
 
     parser.add_argument('-l', '--learn', action='store_true', help='whether or not to train the agent')
     parser.add_argument('-m', '--model', metavar='M', help='name of the model')
-    parser.add_argument('-i', '--iters', metavar='I', help='iterations per environment', default=100, type=int)
+    parser.add_argument('-t', '--training-iters', metavar='I', help='training iterations per environment', default=100,
+                        type=int)
     parser.add_argument('-r', '--routing-method', choices=['basic', 'stochastic', 'sabre'],
                         help='routing method for Qiskit compiler', default='sabre')
     parser.add_argument('-d', '--depth', help='depth of circuit observations', default=8, type=int)
     parser.add_argument('-e', '--envs', help='number of environments (for vectorization)',
                         default=multiprocessing.cpu_count(), type=int)
+    parser.add_argument('-i', '--iters', help='routing iterations for evaluation', default=10, type=int)
     parser.add_argument('--show-topology', action='store_true', help='show circuit topology')
 
     args = parser.parse_args()
@@ -61,10 +82,7 @@ def main():
     training_iterations = 4
     noise_config = NoiseConfig(1.0e-2, 3.0e-3, log_base=2.0)
 
-    g = rx.PyGraph()
-    g.add_nodes_from([0, 1, 2, 3, 4])
-    g.add_edges_from_no_data([(0, 1), (1, 2), (1, 3), (3, 4)])
-
+    g = t_topology()
     circuit_generator = RandomCircuitGenerator(g.num_nodes(), 16)
 
     if args.show_topology:
@@ -88,18 +106,22 @@ def main():
 
         model = MaskablePPO(MaskableMultiInputActorCriticPolicy, vec_env, policy_kwargs=policy_kwargs, n_steps=n_steps,
                             tensorboard_log='logs/routing', learning_rate=5e-5)
+        args.learn = True
         reset = True
 
     if args.learn:
-        model.learn(args.envs * args.iters * n_steps, progress_bar=True, tb_log_name='ppo',
+        model.learn(args.envs * args.training_iters * n_steps, progress_bar=True, tb_log_name='ppo',
                     reset_num_timesteps=reset)
         model.save(args.model_path)
 
     env = env_fn()
     obs, _ = env.reset()
 
+    env.training = False
+    env.initial_mapping = env.node_to_qubit.copy()
+
     reliability_map = {}
-    for edge, value in zip(env.coupling_map.edge_list(), env.error_rates):
+    for edge, value in zip(env.coupling_map.edge_list(), env.error_rates):  # type: ignore
         value = 1.0 - value
         reliability_map[edge] = value
         reliability_map[edge[::-1]] = value
@@ -113,18 +135,27 @@ def main():
     initial_layout = env.qubit_to_node.copy().tolist()
     print(f'Initial depth: {env.circuit.depth()}')
 
-    terminated = False
-    total_reward = 0.0
+    best_reward = -inf
+    routed_circuit = env.circuit.copy_empty_like()
 
-    while not terminated:
-        action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=False)
-        action = int(action)
+    for _ in range(args.iters):
+        terminated = False
+        total_reward = 0.0
 
-        obs, reward, terminated, *_ = env.step(action)
-        total_reward += reward
+        while not terminated:
+            action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=False)
+            action = int(action)
 
-    print(f'Total reward: {total_reward:.3f}\n')
-    routed_circuit = dag_to_circuit(env.routed_dag)
+            obs, reward, terminated, *_ = env.step(action)
+            total_reward += reward
+
+        if total_reward > best_reward:
+            best_reward = total_reward
+            routed_circuit = dag_to_circuit(env.routed_dag)
+
+        obs, _ = env.reset()
+
+    print(f'Total reward: {best_reward:.3f}\n')
 
     print('[b blue]RL Routing[/b blue]')
     print(f'Swaps: {routed_circuit.count_ops().get("swap", 0)}')
