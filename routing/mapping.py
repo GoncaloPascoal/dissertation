@@ -107,7 +107,7 @@ class InitialMappingProblem(Problem):
             total_reward = 0.0
 
             while not terminated:
-                action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=False)
+                action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=True)
                 action = int(action)
 
                 obs, reward, terminated, *_ = env.step(action)

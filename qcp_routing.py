@@ -21,6 +21,22 @@ from routing.env import QcpRoutingEnv, NoiseConfig
 from utils import qubits_to_indices
 
 
+def grid_topology(rows: int, cols: int) -> rx.PyGraph:
+    g = rx.PyGraph()
+
+    g.add_nodes_from(range(rows * cols))
+
+    for row in range(rows):
+        for col in range(cols):
+            if col != cols - 1:
+                g.add_edge(row * cols + col, row * cols + col + 1, None)
+
+            if row != rows - 1:
+                g.add_edge(row * cols + col, (row + 1) * cols + col, None)
+
+    return g
+
+
 def main():
     parser = ArgumentParser(
         'qcp_routing',
@@ -33,7 +49,7 @@ def main():
     parser.add_argument('-r', '--routing-method', choices=['basic', 'stochastic', 'sabre'],
                         help='routing method for Qiskit compiler', default='sabre')
     parser.add_argument('-d', '--depth', help='depth of circuit observations', default=8, type=int)
-    parser.add_argument('-e', '--envs', help='number of enviroments (for vectorization)',
+    parser.add_argument('-e', '--envs', help='number of environments (for vectorization)',
                         default=multiprocessing.cpu_count(), type=int)
     parser.add_argument('--show-topology', action='store_true', help='show circuit topology')
 
