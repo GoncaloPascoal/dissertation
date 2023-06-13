@@ -87,7 +87,7 @@ def main():
     noise_config = NoiseConfig(1.0e-2, 3.0e-3, log_base=2.0)
 
     g = t_topology()
-    circuit_generator = RandomCircuitGenerator(g.num_nodes(), 16, seed=args.seed)
+    circuit_generator = RandomCircuitGenerator(g.num_nodes(), 64, seed=args.seed)
 
     if args.show_topology:
         rx.visualization.mpl_draw(g, with_labels=True)

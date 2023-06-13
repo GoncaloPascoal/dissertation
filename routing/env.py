@@ -216,7 +216,8 @@ QcpObsType = Dict[str, NDArray]
 
 
 class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
-    log_reliabilities_map = Dict[Tuple[int, int], float]
+    last_swap_action: Optional[int]
+    log_reliabilities_map: Dict[Tuple[int, int], float]
 
     observation_space: spaces.Dict
     action_space: spaces.Discrete
@@ -250,6 +251,8 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         self.noise_config = noise_config
         self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
 
+        self.last_swap_action = None
+
         self.circuit_iter = 0
         self.error_rates = np.zeros(self.num_edges)
         self.log_reliabilities = np.zeros(self.num_edges)
@@ -274,6 +277,8 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         options: Optional[Dict[str, Any]] = None,
     ) -> Tuple[QcpObsType, Dict[str, Any]]:
         _, info = super().reset(seed=seed, options=options)
+
+        self.last_swap_action = None
 
         if self.noise_aware and self.training:
             if self.circuit_iter == 0:
@@ -305,6 +310,9 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
             for i, edge in enumerate(self.coupling_map.edge_list()):
                 if not front_layer_nodes.intersection(edge):
                     mask[i + 1] = False
+
+        if self.last_swap_action is not None:
+            mask[self.last_swap_action] = False
 
         # Bridge actions
         for i, pair in enumerate(self.bridge_pairs):
@@ -436,17 +444,21 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
 
     def _schedule_swaps(self, action: int) -> float:
         reward = 0.0
+        is_swap_action = 1 <= action <= self.num_edges
 
-        if 1 <= action <= self.num_edges:
+        if is_swap_action:
             edge = self.coupling_map.edge_list()[action - 1]
             self._swap(edge)
             reward += self._calculate_swap_reward(edge)
 
         self._update_state()
+        self.last_swap_action = None
 
-        # If not a bridge action and no two-qubit gates to schedule, issue a non execution penalty
-        # if action <= self.num_edges and not any(len(nodes) == 2 for _, nodes in self.gates_to_schedule):
-        #     reward += self._calculate_non_execution_reward()
+        # No two-qubit gates to schedule
+        if not any(len(nodes) == 2 for _, nodes in self.gates_to_schedule):
+            # Prevent last swap action from being repeated
+            if is_swap_action:
+                self.last_swap_action = action
 
         return reward
 
