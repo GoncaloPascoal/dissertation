@@ -84,7 +84,6 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
         self.swap_gate = SwapGate()
 
         self.iter = 0
-        self.rng = np.random.default_rng()
 
     def step(self, action: ActType) -> Tuple[ObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
         reward = self._schedule_gates() + self._schedule_bridges(action) + self._schedule_swaps(action)
@@ -98,12 +97,15 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
     ) -> Tuple[ObsType, Dict[str, Any]]:
         if self.training and self.iter == 0:
             if self.iter == 0:
-                self.circuit = self.circuit_generator.generate()
+                self.generate_circuit()
             self.iter = (self.iter + 1) % self.training_iterations
 
         self._reset_dag()
 
         return self._current_obs(), {}
+
+    def generate_circuit(self):
+        self.circuit = self.circuit_generator.generate()
 
     @abstractmethod
     def action_masks(self) -> NDArray:
@@ -155,7 +157,7 @@ class RoutingEnv(gym.Env[ObsType, ActType], ABC):
 
         # Update mappings
         node_a, node_b = edge
-        qubit_a, qubit_b = [self.node_to_qubit[q] for q in edge]
+        qubit_a, qubit_b = (self.node_to_qubit[n] for n in edge)
 
         self.node_to_qubit[node_a], self.node_to_qubit[node_b] = qubit_b, qubit_a
         self.qubit_to_node[qubit_a], self.qubit_to_node[qubit_b] = node_b, node_a
@@ -273,7 +275,7 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
 
         if self.noise_aware and self.training:
             if self.circuit_iter == 0:
-                self._recalibrate()
+                self.recalibrate()
 
             self.circuit_iter = (self.circuit_iter + 1) % self.noise_config.recalibration_interval
 
@@ -360,8 +362,8 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
 
         return obs
 
-    def _recalibrate(self):
-        self.calibrate(self.rng.normal(self.noise_config.mean, self.noise_config.std, self.num_edges))
+    def recalibrate(self):
+        self.calibrate(np.random.normal(self.noise_config.mean, self.noise_config.std, self.num_edges))
 
     def _bridge_args(self, pair: Tuple[int, int]) -> Optional[Tuple[DAGOpNode, Tuple[int, ...]]]:
         for op_node in self.dag.front_layer():

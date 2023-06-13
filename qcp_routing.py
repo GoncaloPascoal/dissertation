@@ -6,6 +6,7 @@ from argparse import ArgumentParser
 from math import inf
 
 import matplotlib.pyplot as plt
+import numpy as np
 import rustworkx as rx
 import torch.nn as nn
 from qiskit import QuantumCircuit, transpile
@@ -16,6 +17,7 @@ from rustworkx.visualization import mpl_draw
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableMultiInputActorCriticPolicy
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
+from tqdm.rich import tqdm
 
 from routing.circuit_gen import RandomCircuitGenerator
 from routing.env import QcpRoutingEnv, NoiseConfig
@@ -73,6 +75,8 @@ def main():
                         default=multiprocessing.cpu_count(), type=int)
     parser.add_argument('-i', '--iters', metavar='I', help='routing iterations for evaluation', default=10, type=int)
     parser.add_argument('--show-topology', action='store_true', help='show circuit topology')
+    parser.add_argument('--eval-circuits', metavar='C', help='number of evaluation circuits', default=100, type=int)
+    parser.add_argument('--seed', metavar='S', help='seed for random number generation', type=int)
 
     args = parser.parse_args()
     args.model_path = f'models/{args.model}.model'
@@ -83,7 +87,7 @@ def main():
     noise_config = NoiseConfig(1.0e-2, 3.0e-3, log_base=2.0)
 
     g = t_topology()
-    circuit_generator = RandomCircuitGenerator(g.num_nodes(), 16)
+    circuit_generator = RandomCircuitGenerator(g.num_nodes(), 16, seed=args.seed)
 
     if args.show_topology:
         rx.visualization.mpl_draw(g, with_labels=True)
@@ -114,14 +118,21 @@ def main():
                     reset_num_timesteps=reset)
         model.save(args.model_path)
 
-    env = env_fn()
-    obs, _ = env.reset()
+    model.set_random_seed(args.seed)
 
+    env = env_fn()
     env.training = False
-    env.initial_mapping = env.node_to_qubit.copy()
+    env.recalibrate()
+
+    # Generate a random initial mapping
+    # TODO: improve random generation to facilitate reproducibility
+    env.initial_mapping = np.arange(env.num_qubits)
+    np.random.shuffle(env.initial_mapping)
+    env.reset()
+    initial_layout = env.qubit_to_node.copy().tolist()
 
     reliability_map = {}
-    for edge, value in zip(env.coupling_map.edge_list(), env.error_rates):  # type: ignore
+    for edge, value in zip(env.coupling_map.edge_list(), env.error_rates):
         value = 1.0 - value
         reliability_map[edge] = value
         reliability_map[edge[::-1]] = value
@@ -132,54 +143,107 @@ def main():
             for instruction in circuit.get_instructions('cx')
         ])
 
-    initial_layout = env.qubit_to_node.copy().tolist()
+    coupling_map = CouplingMap(g.to_directed().edge_list())
 
-    best_reward = -inf
-    routed_circuit = env.circuit.copy_empty_like()
+    avg_episode_reward = 0.0
+    avg_swaps_rl, avg_bridges_rl, avg_swaps_qiskit = 0.0, 0.0, 0.0
+    avg_cnots_rl, avg_cnots_qiskit = 0.0, 0.0
+    avg_depth_rl, avg_depth_qiskit = 0.0, 0.0
+    avg_reliability_rl, avg_reliability_qiskit = 0.0, 0.0
 
-    for i in range(args.iters):
-        terminated = False
-        total_reward = 0.0
+    print('[b yellow]  EVALUATION[/b yellow]')
 
-        while not terminated:
-            action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=False)
-            action = int(action)
-
-            obs, reward, terminated, *_ = env.step(action)
-            total_reward += reward
-
-        if total_reward > best_reward:
-            best_reward = total_reward
-            routed_circuit = dag_to_circuit(env.routed_dag)
-
-            print(f'Increased best reward to {best_reward:.3f} in iteration [yellow]{i + 1}[/yellow]')
-
+    for _ in tqdm(range(args.eval_circuits)):
+        env.generate_circuit()
         obs, _ = env.reset()
 
-    print(f'\nInitial depth: {env.circuit.depth()}')
-    print(f'Total reward: {best_reward:.3f}\n')
+        best_reward = -inf
+        routed_circuit = env.circuit.copy_empty_like()
+
+        for _ in range(args.iters):
+            terminated = False
+            total_reward = 0.0
+
+            while not terminated:
+                action, _ = model.predict(obs, action_masks=env.action_masks(), deterministic=False)
+                action = int(action)
+
+                obs, reward, terminated, *_ = env.step(action)
+                total_reward += reward
+
+            if total_reward > best_reward:
+                best_reward = total_reward
+                routed_circuit = dag_to_circuit(env.routed_dag)
+
+            obs, _ = env.reset()
+
+        t_qc = transpile(env.circuit, coupling_map=coupling_map, initial_layout=initial_layout,
+                         routing_method=args.routing_method, basis_gates=['u', 'swap', 'cx'], optimization_level=0,
+                         seed_transpiler=args.seed)
+
+        rl_ops = routed_circuit.count_ops()
+        qiskit_ops = t_qc.count_ops()
+
+        avg_episode_reward += best_reward
+
+        avg_swaps_rl += rl_ops.get("swap", 0)
+        avg_bridges_rl += rl_ops.get("bridge", 0)
+        avg_swaps_qiskit += qiskit_ops.get("swap", 0)
+
+        routed_circuit = routed_circuit.decompose()
+        t_qc = t_qc.decompose()
+
+        avg_cnots_rl += routed_circuit.count_ops().get("cx", 0)
+        avg_cnots_qiskit += t_qc.count_ops().get("cx", 0)
+
+        avg_depth_rl += routed_circuit.depth()
+        avg_depth_qiskit += t_qc.depth()
+
+        avg_reliability_rl += reliability(routed_circuit)
+        avg_reliability_qiskit += reliability(t_qc)
+
+    # Calculate averages
+    avg_episode_reward /= args.eval_circuits
+
+    avg_swaps_rl /= args.eval_circuits
+    avg_bridges_rl /= args.eval_circuits
+    avg_swaps_qiskit /= args.eval_circuits
+
+    avg_cnots_rl /= args.eval_circuits
+    avg_cnots_qiskit /= args.eval_circuits
+
+    avg_depth_rl /= args.eval_circuits
+    avg_depth_qiskit /= args.eval_circuits
+
+    avg_reliability_rl /= args.eval_circuits
+    avg_reliability_qiskit /= args.eval_circuits
+
+    # Print results
+    print(f'\nAverage episode reward: {avg_episode_reward:.3f}\n')
 
     print('[b blue]RL Routing[/b blue]')
-    print(f'Swaps: {routed_circuit.count_ops().get("swap", 0)}')
+    print(f'Average swaps: {avg_swaps_rl:.2f}')
     if env.allow_bridge_gate:
-        print(f'Bridges: {routed_circuit.count_ops().get("bridge", 0)}')
+        print(f'Average bridges: {avg_bridges_rl:.2f}')
 
-    routed_circuit = routed_circuit.decompose()
-    print(f'CNOTs after decomposition: {routed_circuit.count_ops()["cx"]}')
-    print(f'Depth after decomposition: {routed_circuit.depth()}')
-    print(f'Reliability after decomposition: {reliability(routed_circuit):.3%}\n')
-
-    coupling_map = CouplingMap(g.to_directed().edge_list())
-    t_qc = transpile(env.circuit, coupling_map=coupling_map, initial_layout=initial_layout,
-                     routing_method=args.routing_method, basis_gates=['u', 'swap', 'cx'], optimization_level=0)
+    print(f'Average CNOTs after decomposition: {avg_cnots_rl:.2f}')
+    print(f'Average depth after decomposition: {avg_depth_rl:.2f}')
+    print(f'Average reliability after decomposition: {avg_reliability_rl:.3%}\n')
 
     print(f'[b blue]Qiskit Compiler ({args.routing_method} routing)[/b blue]')
-    print(f'Swaps: {t_qc.count_ops().get("swap", 0)}')
+    print(f'Average swaps: {avg_swaps_qiskit:.3f}')
 
-    t_qc = t_qc.decompose()
-    print(f'CNOTs after decomposition: {t_qc.count_ops().get("cx")}')
-    print(f'Depth after decomposition: {t_qc.depth()}')
-    print(f'Reliability after decomposition: {reliability(t_qc):.3%}\n')
+    print(f'Average CNOTs after decomposition: {avg_cnots_qiskit:.2f}')
+    print(f'Average depth after decomposition: {avg_depth_qiskit:.2f}')
+    print(f'Average reliability after decomposition: {avg_reliability_qiskit:.3%}\n')
+
+    print(f'[b blue]RL vs Qiskit[/b blue]')
+    avg_cnot_reduction = (avg_cnots_qiskit - avg_cnots_rl) / avg_cnots_qiskit
+    print(f'Average CNOT reduction: [magenta]{avg_cnot_reduction:.3%}[/magenta]')
+    avg_depth_reduction = (avg_depth_qiskit - avg_depth_rl) / avg_depth_qiskit
+    print(f'Average depth reduction: [magenta]{avg_depth_reduction:.3%}[/magenta]')
+    avg_reliability_increase = (avg_reliability_rl - avg_reliability_qiskit) / avg_reliability_qiskit
+    print(f'Average reliability increase: [magenta]{avg_reliability_increase:.3%}[/magenta]')
 
 
 if __name__ == '__main__':
