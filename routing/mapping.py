@@ -11,6 +11,7 @@ from evotorch.tools import ObjectArray
 from sb3_contrib import MaskablePPO
 
 from routing.env import RoutingEnv
+from utils import qubits_to_indices
 
 
 class OrderedCrossOver(CrossOver):
@@ -223,7 +224,7 @@ def main():
     routed_circuit = dag_to_circuit(env.routed_dag)
 
     print('[b blue]RL Routing[/b blue]')
-    print(f'Layout: {env.initial_mapping.tolist()}')
+    print(f'Layout: {tuple(env.initial_mapping)}')
     print(f'Swaps: {routed_circuit.count_ops().get("swap", 0)}')
     if env.allow_bridge_gate:
         print(f'Bridges: {routed_circuit.count_ops().get("bridge", 0)}')
@@ -237,7 +238,7 @@ def main():
                      routing_method=routing_method, basis_gates=['u', 'swap', 'cx'], optimization_level=0)
 
     print(f'[b blue]Qiskit Compiler ({routing_method} routing)[/b blue]')
-    print(f'Layout: {list(t_qc.layout.initial_layout.get_virtual_bits().values())}')
+    print(f'Layout: {qubits_to_indices(env.circuit, t_qc.layout.initial_layout.get_physical_bits().values())}')
     print(f'Swaps: {t_qc.count_ops().get("swap", 0)}')
 
     t_qc = t_qc.decompose()

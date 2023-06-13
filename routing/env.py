@@ -236,6 +236,7 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         training: bool = True,
         training_iterations: int = 1,
         noise_config: Optional[NoiseConfig] = None,
+        restrict_swaps_to_front_layer: bool = True,
     ):
         super().__init__(coupling_map, circuit_generator, gate_reward, initial_mapping, allow_bridge_gate,
                          only_schedule_front_layer, training, training_iterations)
@@ -247,6 +248,7 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
         self.swap_penalty = swap_penalty
         self.non_execution_penalty = non_execution_penalty
         self.noise_config = noise_config
+        self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
 
         self.circuit_iter = 0
         self.error_rates = np.zeros(self.num_edges)
@@ -291,6 +293,18 @@ class QcpRoutingEnv(RoutingEnv[QcpObsType, int]):
 
     def action_masks(self) -> NDArray:
         mask = np.ones(self.action_space.n, dtype=bool)
+
+        if self.restrict_swaps_to_front_layer:
+            front_layer_nodes = set()
+            for op_node in self.dag.front_layer():
+                indices = qubits_to_indices(self.circuit, op_node.qargs)
+                nodes = (self.qubit_to_node[i] for i in indices)
+
+                front_layer_nodes.update(nodes)
+
+            for i, edge in enumerate(self.coupling_map.edge_list()):
+                if not front_layer_nodes.intersection(edge):
+                    mask[i + 1] = False
 
         # Bridge actions
         for i, pair in enumerate(self.bridge_pairs):
