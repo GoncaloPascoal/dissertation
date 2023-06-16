@@ -75,6 +75,7 @@ def main():
     parser.add_argument('-d', '--depth', help='depth of circuit observations', default=8, type=int)
     parser.add_argument('-i', '--iters', metavar='I', help='routing iterations for evaluation', default=20, type=int)
     parser.add_argument('--eval-circuits', metavar='C', help='number of evaluation circuits', default=100, type=int)
+    parser.add_argument('--circuit-size', metavar='S', help='number of gates in random circuits', default=16, type=int)
     parser.add_argument('--show-topology', action='store_true', help='show circuit topology')
     parser.add_argument('--seed', metavar='S', help='seed for random number generation', type=int)
 
@@ -87,7 +88,7 @@ def main():
     noise_config = NoiseConfig(1.0e-2, 3.0e-3, log_base=2.0)
 
     g = t_topology()
-    circuit_generator = RandomCircuitGenerator(g.num_nodes(), 64, seed=args.seed)
+    circuit_generator = RandomCircuitGenerator(g.num_nodes(), args.circuit_size, seed=args.seed)
 
     if args.show_topology:
         rx.visualization.mpl_draw(g, with_labels=True)
@@ -97,15 +98,19 @@ def main():
         return QcpRoutingEnv(g, circuit_generator, args.depth, training_iterations=training_iterations,
                              noise_config=noise_config, termination_reward=0.0)
 
-    vec_env = VecMonitor(SubprocVecEnv([env_fn] * args.envs))
-
     try:
-        model = MaskablePPO.load(args.model_path, vec_env, tensorboard_log='logs/routing')
+        model = MaskablePPO.load(args.model_path, tensorboard_log='logs/routing')
+
+        args.depth = model.observation_space['circuit'].shape[1]
+        vec_env = VecMonitor(SubprocVecEnv([env_fn] * args.envs))
+        model.set_env(vec_env)
+
         reset = False
     except FileNotFoundError:
+        vec_env = VecMonitor(SubprocVecEnv([env_fn] * args.envs))
         policy_kwargs = {
             'net_arch': [64, 64, 96],
-            'activation_fn': nn.Tanh,
+            'activation_fn': nn.SiLU,
         }
 
         model = MaskablePPO(MaskableMultiInputActorCriticPolicy, vec_env, policy_kwargs=policy_kwargs, n_steps=n_steps,
