@@ -33,7 +33,7 @@ class NoiseConfig:
         return np.random.normal(self.mean, self.std, n).clip(0.0, 1.0)
 
     def calculate_log_reliabilities(self, error_rates: NDArray) -> NDArray:
-        if np.any(error_rates < 0.0 | error_rates > 1.0):
+        if np.any((error_rates < 0.0) | (error_rates > 1.0)):
             raise ValueError('Got invalid values for error rates')
 
         return np.where(
@@ -70,6 +70,8 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     action_space: spaces.Discrete
 
     initial_mapping: Optional[NDArray]
+    error_rates: NDArray
+    log_reliabilities: NDArray
     log_reliabilities_map: Dict[Tuple[int, int], float]
 
     def __init__(
@@ -117,9 +119,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.circuit = QuantumCircuit(self.num_qubits)
 
         # Noise-awareness information
-        self.error_rates = np.zeros(self.num_edges)
-        self.log_reliabilities = np.zeros(self.num_edges)
-        self.log_reliabilities_map = {}
+        self.calibrate(np.zeros(self.num_edges))
 
         bridge_circuit = QuantumCircuit(3)
         for _ in range(2):
@@ -431,16 +431,18 @@ class QcpRoutingEnv(SequentialRoutingEnv):
         restrict_swaps_to_front_layer: bool = True,
         base_gate_reward: float = -1.0,
     ):
-        super().__init__(coupling_map, circuit_generator, initial_mapping, allow_bridge_gate, noise_config, training,
-                         training_iterations, restrict_swaps_to_front_layer, base_gate_reward)
-
         if depth <= 0:
             raise ValueError(f'Depth must be positive, got {depth}')
 
         self.depth = depth
 
+        super().__init__(coupling_map, circuit_generator, initial_mapping, allow_bridge_gate, noise_config, training,
+                         training_iterations, restrict_swaps_to_front_layer, base_gate_reward)
+
     def _obs_spaces(self) -> Dict[str, spaces.Space]:
-        return {'circuit': spaces.Box(-1, self.num_qubits - 1, (self.num_qubits, self.depth), dtype=Int32)}
+        obs_spaces = super()._obs_spaces()
+        obs_spaces['circuit'] = spaces.Box(-1, self.num_qubits - 1, (self.num_qubits, self.depth), dtype=Int32)
+        return obs_spaces
 
     def _current_obs(self) -> RoutingObsType:
         obs = super()._current_obs()

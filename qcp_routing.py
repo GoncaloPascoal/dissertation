@@ -66,7 +66,7 @@ def main():
 
     parser.add_argument('-m', '--model', metavar='M', help='name of the model', required=True)
     parser.add_argument('-l', '--learn', action='store_true', help='whether or not to train the agent')
-    parser.add_argument('-t', '--training-iters', metavar='I', help='training iterations per environment', default=100,
+    parser.add_argument('-t', '--training-iters', metavar='I', help='training iterations per environment', default=50,
                         type=int)
     parser.add_argument('-e', '--envs', help='number of environments (for vectorization)',
                         default=multiprocessing.cpu_count(), type=int)
@@ -96,7 +96,7 @@ def main():
 
     def env_fn() -> QcpRoutingEnv:
         return QcpRoutingEnv(g, circuit_generator, args.depth, training_iterations=training_iterations,
-                             noise_config=noise_config, termination_reward=0.0)
+                             noise_config=noise_config)
 
     try:
         model = MaskablePPO.load(args.model_path, tensorboard_log='logs/routing')
@@ -131,8 +131,7 @@ def main():
 
     # Generate a random initial mapping
     # TODO: improve random generation to facilitate reproducibility
-    env.initial_mapping = np.arange(env.num_qubits)
-    np.random.shuffle(env.initial_mapping)
+    env.set_random_initial_mapping()
     env.reset()
     initial_layout = env.qubit_to_node.copy().tolist()
 
@@ -178,7 +177,7 @@ def main():
 
             if total_reward > best_reward:
                 best_reward = total_reward
-                routed_circuit = dag_to_circuit(env.routed_dag)
+                routed_circuit = env.routed_circuit()
 
             obs, _ = env.reset()
 
