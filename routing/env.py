@@ -119,7 +119,8 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.circuit = QuantumCircuit(self.num_qubits)
 
         # Noise-awareness information
-        self.calibrate(np.zeros(self.num_edges))
+        if self.noise_aware:
+            self.calibrate(np.zeros(self.num_edges))
 
         bridge_circuit = QuantumCircuit(3)
         for _ in range(2):
@@ -159,10 +160,12 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
             if self.iter % self.training_iterations == 0:
                 self.generate_circuit()
+            else:
+                self._reset_dag()
 
             self.iter += 1
-
-        self._reset_dag()
+        else:
+            self._reset_dag()
 
         return self._current_obs(), {}
 
@@ -281,6 +284,16 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
 
 class SequentialRoutingEnv(RoutingEnv, ABC):
+    """
+    Sequential routing environment, where SWAP and BRIDGE operations are iteratively added to the routed circuit.
+    Subclasses should override the :py:meth:`_current_obs` and :py:meth:`_obs_spaces` methods to provide their
+    desired observation representations.
+
+    :param restrict_swaps_to_front_layer: Restrict SWAP operations to edges involving qubits that are part of two-qubit
+        operations in the front (first) layer of the original circuit.
+    :param base_gate_reward: Base reward for scheduling a two-qubit gate when the environment isn't noise-aware.
+    """
+
     _blocked_swap: Optional[int]
 
     def __init__(
@@ -326,10 +339,9 @@ class SequentialRoutingEnv(RoutingEnv, ABC):
             reward = self._bridge_reward(*nodes)
 
         self._update_state()
-        reward += self._scheduling_reward
+        # reward += self._scheduling_reward
 
-        if is_swap:
-            self._blocked_swap = action
+        # self._blocked_swap = action if is_swap and self._scheduling_reward == 0.0 else None
 
         return self._current_obs(), reward, self._terminated(), False, {}
 
@@ -399,8 +411,8 @@ class SequentialRoutingEnv(RoutingEnv, ABC):
     def _bridge_reward(self, control: int, middle: int, target: int) -> float:
         if self.noise_aware:
             return 2.0 * (
-                self.log_reliabilities_map[(control, middle)] +
-                self.log_reliabilities_map[(middle, target)]
+                self.log_reliabilities_map[(middle, target)] +
+                self.log_reliabilities_map[(control, middle)]
             )
         else:
             return 4.0 * self.base_gate_reward
@@ -418,6 +430,13 @@ class SequentialRoutingEnv(RoutingEnv, ABC):
 
 
 class QcpRoutingEnv(SequentialRoutingEnv):
+    """
+    Environment with circuit representations from `Optimizing quantum circuit placement via machine learning
+    <https://dl.acm.org/doi/10.1145/3489517.3530403>`_.
+
+    :param depth: Number of two-qubit gate layers in the matrix circuit representation.
+    """
+
     def __init__(
         self,
         coupling_map: rx.PyGraph,

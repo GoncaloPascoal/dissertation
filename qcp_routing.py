@@ -6,11 +6,9 @@ from argparse import ArgumentParser
 from math import inf
 
 import matplotlib.pyplot as plt
-import numpy as np
 import rustworkx as rx
 import torch.nn as nn
 from qiskit import QuantumCircuit, transpile
-from qiskit.converters import dag_to_circuit
 from qiskit.transpiler import CouplingMap
 from rich import print
 from rustworkx.visualization import mpl_draw
@@ -118,12 +116,13 @@ def main():
         args.learn = True
         reset = True
 
+    model.set_random_seed(args.seed)
+
     if args.learn:
         model.learn(args.envs * args.training_iters * n_steps, progress_bar=True, tb_log_name='ppo',
                     reset_num_timesteps=reset)
         model.save(args.model_path)
-
-    model.set_random_seed(args.seed)
+        return
 
     env = env_fn()
     env.training = False
@@ -222,28 +221,37 @@ def main():
     avg_reliability_rl /= args.eval_circuits
     avg_reliability_qiskit /= args.eval_circuits
 
+    avg_added_cnots_rl = avg_cnots_rl - args.circuit_size
+    avg_added_cnots_qiskit = avg_cnots_qiskit - args.circuit_size
+
     # Print results
     print(f'\nAverage episode reward: {avg_episode_reward:.3f}\n')
 
     print('[b blue]RL Routing[/b blue]')
-    print(f'Average swaps: {avg_swaps_rl:.2f}')
+    print(f'- Average swaps: {avg_swaps_rl:.2f}')
     if env.allow_bridge_gate:
-        print(f'Average bridges: {avg_bridges_rl:.2f}')
+        print(f'- Average bridges: {avg_bridges_rl:.2f}')
 
-    print(f'Average CNOTs after decomposition: {avg_cnots_rl:.2f}')
-    print(f'Average depth after decomposition: {avg_depth_rl:.2f}')
-    print(f'Average reliability after decomposition: {avg_reliability_rl:.3%}\n')
+    print('[b yellow]After Decomposition[/b yellow]')
+    print(f'- Average CNOTs: {avg_cnots_rl:.2f}')
+    print(f'- Average added CNOTs: {avg_added_cnots_rl:.2f}')
+    print(f'- Average depth: {avg_depth_rl:.2f}')
+    print(f'- Average reliability: {avg_reliability_rl:.3%}\n')
 
     print(f'[b blue]Qiskit Compiler ({args.routing_method} routing)[/b blue]')
-    print(f'Average swaps: {avg_swaps_qiskit:.3f}')
+    print(f'- Average swaps: {avg_swaps_qiskit:.3f}')
 
-    print(f'Average CNOTs after decomposition: {avg_cnots_qiskit:.2f}')
-    print(f'Average depth after decomposition: {avg_depth_qiskit:.2f}')
-    print(f'Average reliability after decomposition: {avg_reliability_qiskit:.3%}\n')
+    print('[b yellow]After Decomposition[/b yellow]')
+    print(f'- Average CNOTs: {avg_cnots_qiskit:.2f}')
+    print(f'- Average added CNOTs: {avg_added_cnots_qiskit:.2f}')
+    print(f'- Average depth: {avg_depth_qiskit:.2f}')
+    print(f'- Average reliability: {avg_reliability_qiskit:.3%}\n')
 
     print(f'[b blue]RL vs Qiskit[/b blue]')
     avg_cnot_reduction = (avg_cnots_qiskit - avg_cnots_rl) / avg_cnots_qiskit
     print(f'Average CNOT reduction: [magenta]{avg_cnot_reduction:.3%}[/magenta]')
+    avg_added_cnot_reduction = (avg_added_cnots_qiskit - avg_added_cnots_rl) / avg_added_cnots_qiskit
+    print(f'Average added CNOT reduction: [magenta]{avg_added_cnot_reduction:.3%}[/magenta]')
     avg_depth_reduction = (avg_depth_qiskit - avg_depth_rl) / avg_depth_qiskit
     print(f'Average depth reduction: [magenta]{avg_depth_reduction:.3%}[/magenta]')
     avg_reliability_increase = (avg_reliability_rl - avg_reliability_qiskit) / avg_reliability_qiskit
