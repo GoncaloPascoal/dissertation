@@ -66,16 +66,19 @@ def main():
     parser.add_argument('-l', '--learn', action='store_true', help='whether or not to train the agent')
     parser.add_argument('-t', '--training-iters', metavar='I', help='training iterations per environment', default=50,
                         type=int)
-    parser.add_argument('-e', '--envs', help='number of environments (for vectorization)',
+    parser.add_argument('-e', '--envs', metavar='E', help='number of environments (for vectorization)',
                         default=multiprocessing.cpu_count(), type=int)
     parser.add_argument('-r', '--routing-method', choices=['basic', 'stochastic', 'sabre'],
                         help='routing method for Qiskit compiler', default='sabre')
-    parser.add_argument('-d', '--depth', help='depth of circuit observations', default=8, type=int)
+    parser.add_argument('-d', '--depth', metavar='D', help='depth of circuit observations', default=8, type=int)
     parser.add_argument('-i', '--iters', metavar='I', help='routing iterations for evaluation', default=20, type=int)
     parser.add_argument('--eval-circuits', metavar='C', help='number of evaluation circuits', default=100, type=int)
     parser.add_argument('--circuit-size', metavar='S', help='number of gates in random circuits', default=16, type=int)
     parser.add_argument('--show-topology', action='store_true', help='show circuit topology')
     parser.add_argument('--seed', metavar='S', help='seed for random number generation', type=int)
+    parser.add_argument('--net-arch', metavar='N', nargs='+',
+                        help='neural network architecture (number of nodes in each fully-connected layer)',
+                        default=[64, 64, 96], type=int)
 
     args = parser.parse_args()
     args.model_path = f'models/{args.model}.model'
@@ -107,7 +110,7 @@ def main():
     except FileNotFoundError:
         vec_env = VecMonitor(SubprocVecEnv([env_fn] * args.envs))
         policy_kwargs = {
-            'net_arch': [64, 64, 96],
+            'net_arch': args.net_arch,
             'activation_fn': nn.SiLU,
         }
 
