@@ -1,8 +1,9 @@
 
 from abc import ABC, abstractmethod
+from collections.abc import MutableMapping, Iterable
 from dataclasses import dataclass, field
 from math import e
-from typing import Optional, Tuple, Dict, Any, List, SupportsFloat
+from typing import Optional, Tuple, Dict, Any, List, SupportsFloat, Iterator
 
 import gymnasium as gym
 import numpy as np
@@ -44,6 +45,8 @@ class NoiseConfig:
 
 
 RoutingObsType = Dict[str, NDArray]
+GateSchedulingList = List[Tuple[Operation, Tuple[int, ...]]]
+BridgeArgs = Tuple[DAGOpNode, Tuple[int, int, int]]
 
 
 class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
@@ -236,10 +239,31 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     def _terminated(self) -> bool:
         return self.dag.size() == 0
 
-    def _schedule_gates(self, gates: List[Tuple[Operation, Tuple[int, ...]]]):
+    def _schedule_gates(self, gates: GateSchedulingList):
         for op, nodes in gates:
             qargs = indices_to_qubits(self.circuit, nodes)
             self.routed_dag.apply_operation_back(op, qargs)
+
+    def _schedulable_gates(self, only_front_layer: bool = False) -> GateSchedulingList:
+        gates = []
+        layers = [self.dag.front_layer()] if only_front_layer else dag_layers(self.dag)
+        stop = False
+
+        for layer in layers:
+            for op_node in layer:
+                indices = qubits_to_indices(self.circuit, op_node.qargs)
+                nodes = tuple(self.qubit_to_node[i] for i in indices)
+
+                if len(nodes) != 2 or self.coupling_map.has_edge(nodes[0], nodes[1]):
+                    gates.append((op_node.op, nodes))
+                    self.dag.remove_op_node(op_node)
+                else:
+                    stop = True
+
+            if stop:
+                break
+
+        return gates
 
     def _bridge(self, control: int, middle: int, target: int):
         indices = (control, middle, target)
@@ -281,6 +305,18 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
             self.qubit_to_node[qubit] = node
 
         self._update_state()
+
+    def _bridge_args(self, pair: Tuple[int, int]) -> Optional[BridgeArgs]:
+        for op_node in self.dag.front_layer():
+            if isinstance(op_node.op, CXGate):
+                indices = qubits_to_indices(self.circuit, op_node.qargs)
+                nodes = tuple(self.qubit_to_node[i] for i in indices)
+
+                if tuple(sorted(nodes)) == pair:
+                    control, target = nodes
+                    return op_node, tuple(self.shortest_paths[control][target])
+
+        return None
 
 
 class SequentialRoutingEnv(RoutingEnv, ABC):
@@ -331,8 +367,7 @@ class SequentialRoutingEnv(RoutingEnv, ABC):
         else:
             # BRIDGE action
             pair = self.bridge_pairs[action - self.num_edges]
-            op_node, (control, target) = self._bridge_args(pair)
-            nodes = self.shortest_paths[control][target]
+            op_node, nodes = self._bridge_args(pair)
 
             self.dag.remove_op_node(op_node)
             self._bridge(*nodes)
@@ -376,25 +411,9 @@ class SequentialRoutingEnv(RoutingEnv, ABC):
         return mask
 
     def _update_state(self):
-        gates_to_schedule = []
-        stop = False
-
-        for layer in dag_layers(self.dag):
-            for op_node in layer:
-                indices = qubits_to_indices(self.circuit, op_node.qargs)
-                nodes = tuple(self.qubit_to_node[i] for i in indices)
-
-                if len(nodes) != 2 or self.coupling_map.has_edge(nodes[0], nodes[1]):
-                    gates_to_schedule.append((op_node.op, nodes))
-                    self.dag.remove_op_node(op_node)
-                else:
-                    stop = True
-
-            if stop:
-                break
-
-        self._schedule_gates(gates_to_schedule)
-        self._scheduling_reward = sum(self._gate_reward(nodes) for _, nodes in gates_to_schedule if len(nodes) == 2)
+        gates = self._schedulable_gates()
+        self._schedule_gates(gates)
+        self._scheduling_reward = sum(self._gate_reward(nodes) for _, nodes in gates if len(nodes) == 2)
 
     def _gate_reward(self, edge: Tuple[int, int]) -> float:
         if self.noise_aware:
@@ -417,22 +436,14 @@ class SequentialRoutingEnv(RoutingEnv, ABC):
         else:
             return 4.0 * self.base_gate_reward
 
-    def _bridge_args(self, pair: Tuple[int, int]) -> Optional[Tuple[DAGOpNode, Tuple[int, ...]]]:
-        for op_node in self.dag.front_layer():
-            if isinstance(op_node.op, CXGate):
-                indices = qubits_to_indices(self.circuit, op_node.qargs)
-                nodes = tuple(self.qubit_to_node[i] for i in indices)
-
-                if tuple(sorted(nodes)) == pair:
-                    return op_node, nodes
-
-        return None
-
 
 class QcpRoutingEnv(SequentialRoutingEnv):
     """
-    Environment with circuit representations from `Optimizing quantum circuit placement via machine learning
-    <https://dl.acm.org/doi/10.1145/3489517.3530403>`_.
+    Environment using circuit representations from `Optimizing quantum circuit placement via machine learning
+    <https://dl.acm.org/doi/10.1145/3489517.3530403>`_. The circuit observation consists of a matrix where each row
+    corresponds to a physical node. The element at (i, j) corresponds to the qubit targeted by the logical
+    qubit currently occupying the i-th node, at time step (layer) j. A value of -1 is used if the qubit is not involved
+    in an interaction at that time step.
 
     :param depth: Number of two-qubit gate layers in the matrix circuit representation.
     """
@@ -499,6 +510,39 @@ class QcpRoutingEnv(SequentialRoutingEnv):
         return obs
 
 
+class SchedulingMap(MutableMapping[int, int]):
+    _map: Dict[int, int]
+
+    def __init__(self):
+        self._map = {}
+
+    def __setitem__(self, k: int, v: int):
+        if v == 0:
+            if k in self._map:
+                del self._map[k]
+        else:
+            self._map.__setitem__(k, v)
+
+    def __delitem__(self, k: int):
+        self._map.__delitem__(k)
+
+    def __getitem__(self, k: int) -> int:
+        return self._map.__getitem__(k)
+
+    def __len__(self) -> int:
+        return self._map.__len__()
+
+    def __iter__(self) -> Iterator[int]:
+        return self._map.__iter__()
+
+    def decrement(self):
+        for k in self._map:
+            self[k] -= 1
+
+    def update_all(self, keys: Iterable[int], value: int = 1):
+        self.update((k, value) for k in keys)
+
+
 class LayeredRoutingEnv(RoutingEnv):
     def __init__(
         self,
@@ -513,108 +557,146 @@ class LayeredRoutingEnv(RoutingEnv):
         super().__init__(coupling_map, circuit_generator, initial_mapping, allow_bridge_gate,
                          noise_config, training, training_iterations)
 
-        self.diameter = np.max(self.distance_matrix)
-        self.max_degree = max(coupling_map.degree(idx) for idx in coupling_map.node_indices())
+        self.scheduling_map = SchedulingMap()
 
-        # State information
-        self.qubit_targets = np.full(self.num_qubits, -1, dtype=np.int32)
-        self.circuit_progress = np.zeros(self.num_qubits, dtype=np.int32)
-
-        num_actions = 1 + self.num_edges + len(self.bridge_pairs)
+        # Account for COMMIT / FINISH action in addition to SWAP and BRIDGE gates
+        num_actions = self.num_edges + len(self.bridge_pairs) + 1
         self.action_space = spaces.Discrete(num_actions)
+
+    def step(self, action: int) -> Tuple[RoutingObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
+        # TODO: figure out how to implement rewards (maybe extract rewards to superclass)
+        reward = 0.0
+
+        if action < self.num_edges:
+            # SWAP action
+            edge = self.edge_list[action]
+
+            self._swap(edge)
+        elif action < self.num_edges + len(self.bridge_pairs):
+            # BRIDGE action
+            pair = self.bridge_pairs[action - self.num_edges]
+            op_node, nodes = self._bridge_args(pair)
+
+            self.dag.remove_op_node(op_node)
+            self._bridge(*nodes)
+        else:
+            # COMMIT action
+            self._update_state()
+
+        return self._current_obs(), reward, self._terminated(), False, {}
 
     def action_masks(self) -> NDArray:
         mask = np.ones(self.action_space.n, dtype=bool)
 
-        for i, edge in enumerate(self.edge_list):
-            if self.protected_nodes.intersection(edge):
-                mask[i, 1] = False
+        # Swap actions
+        invalid_swap_actions = [
+            i for i, edge in enumerate(self.edge_list)
+            if self.scheduling_map.keys() & edge
+        ]
+        mask[invalid_swap_actions] = False
+
+        # Bridge actions
+        invalid_bridge_actions = [
+            self.num_edges + i for i, pair in enumerate(self.bridge_pairs)
+            if self._bridge_args(pair) is None
+        ]
+        mask[invalid_bridge_actions] = False
+
+        # Cannot COMMIT an empty layer
+        if not self.scheduling_map:
+            mask[-1] = False
 
         return mask
 
-    def _current_obs(self) -> NDArray:
-        obs = np.zeros(shape=self.observation_space.shape, dtype=self.observation_space.dtype)
-        edge_vector_idx = self.diameter + 1
+    def _bridge(self, control: int, middle: int, target: int):
+        super()._bridge(control, middle, target)
+        self.scheduling_map.update_all((control, middle, target))
 
-        for qubit in range(self.num_qubits):
-            target = self.qubit_targets[qubit]
-            if target != -1:
-                # Distance vector
-                qubit_node = self.qubit_to_node[qubit]
-                target_node = self.qubit_to_node[target]
+    def _swap(self, edge: Tuple[int, int]):
+        super()._swap(edge)
+        self.scheduling_map.update_all(edge)
 
-                distance = self.distance_matrix[qubit_node, target_node]
-                obs[distance] += 1
-
-                # Edge vector
-                num_edges = 0
-                for _, child_node, _ in self.coupling_map.out_edges(qubit):
-                    child_target = self.qubit_targets[target]
-                    if (
-                        child_target not in {-1, qubit} and
-                        self.shortest_paths[qubit][child_target][1] == child_node and
-                        not self.protected_nodes.intersection({qubit, child_node})
-                    ):
-                        num_edges += 1
-                obs[edge_vector_idx + num_edges] += 1
-
-        return obs
-
-    def _schedule_bridges(self, action: NDArray) -> float:
-        # TODO
-        return 0.0
-
-    def _schedule_swaps(self, action: NDArray) -> float:
-        reward = 0.0
-
-        pre_swap_distances = self._qubit_distances()
-
-        to_swap = [self.edge_list[i] for i in np.flatnonzero(action)]
-
-        for edge in to_swap:
-            if not self.protected_nodes.intersection(edge):
-                self._swap(edge)
-
-        self._update_state()
-
-        post_swap_distances = self._qubit_distances()
-        reward += np.sum(np.sign(pre_swap_distances - post_swap_distances)) * self.distance_reduction_reward
-
-        return reward
-
-    def _terminated(self) -> bool:
-        return np.all(self.qubit_targets == -1)
+    def _schedule_gates(self, gates: GateSchedulingList):
+        super()._schedule_gates(gates)
+        self.scheduling_map.update_all(*(nodes for _, nodes in gates))
 
     def _reset_state(self):
         super()._reset_state()
-
-        self.circuit_progress.fill(0)
+        self.scheduling_map.clear()
 
     def _update_state(self):
-        super()._update_state()
+        self.scheduling_map.decrement()
+        self._schedule_gates(self._schedulable_gates(only_front_layer=True))
 
-        self.qubit_targets.fill(-1)
+        # self.qubit_targets.fill(-1)
+        #
+        # for i, wire in enumerate(self.dag.wires):
+        #     if isinstance(wire, Clbit):
+        #         break
+        #
+        #     for op_node in self.dag.nodes_on_wire(wire, only_ops=True):
+        #         if isinstance(op_node.op, CXGate):
+        #             other = [q for q in op_node.qargs if q != wire][0]
+        #             other_idx = self.circuit.find_bit(other).index
+        #             self.qubit_targets[i] = other_idx
+        #
+        #             break
 
-        for i, wire in enumerate(self.dag.wires):
-            if isinstance(wire, Clbit):
-                break
+    # def _current_obs(self) -> NDArray:
+    #     obs = np.zeros(shape=self.observation_space.shape, dtype=self.observation_space.dtype)
+    #     edge_vector_idx = self.diameter + 1
+    #
+    #     for qubit in range(self.num_qubits):
+    #         target = self.qubit_targets[qubit]
+    #         if target != -1:
+    #             # Distance vector
+    #             qubit_node = self.qubit_to_node[qubit]
+    #             target_node = self.qubit_to_node[target]
+    #
+    #             distance = self.distance_matrix[qubit_node, target_node]
+    #             obs[distance] += 1
+    #
+    #             # Edge vector
+    #             num_edges = 0
+    #             for _, child_node, _ in self.coupling_map.out_edges(qubit):
+    #                 child_target = self.qubit_targets[target]
+    #                 if (
+    #                     child_target not in {-1, qubit} and
+    #                     self.shortest_paths[qubit][child_target][1] == child_node and
+    #                     not self.protected_nodes.intersection({qubit, child_node})
+    #                 ):
+    #                     num_edges += 1
+    #             obs[edge_vector_idx + num_edges] += 1
+    #
+    #     return obs
+    #
+    # def _schedule_swaps(self, action: NDArray) -> float:
+    #     reward = 0.0
+    #
+    #     pre_swap_distances = self._qubit_distances()
+    #
+    #     to_swap = [self.edge_list[i] for i in np.flatnonzero(action)]
+    #
+    #     for edge in to_swap:
+    #         if not self.protected_nodes.intersection(edge):
+    #             self._swap(edge)
+    #
+    #     self._update_state()
+    #
+    #     post_swap_distances = self._qubit_distances()
+    #     reward += np.sum(np.sign(pre_swap_distances - post_swap_distances)) * self.distance_reduction_reward
+    #
+    #     return reward
+    #
+    # def _qubit_distances(self) -> NDArray:
+    #     distances = np.zeros(self.num_qubits)
+    #
+    #     for qubit, target in enumerate(self.qubit_targets):
+    #         if target != -1:
+    #             qubit_node = self.qubit_to_node[qubit]
+    #             target_node = self.qubit_to_node[target]
+    #
+    #             distances[qubit] = self.distance_matrix[qubit_node, target_node]
+    #
+    #     return distances
 
-            for op_node in self.dag.nodes_on_wire(wire, only_ops=True):
-                if isinstance(op_node.op, CXGate):
-                    other = [q for q in op_node.qargs if q != wire][0]
-                    other_idx = self.circuit.find_bit(other).index
-                    self.qubit_targets[i] = other_idx
-
-                    break
-
-    def _qubit_distances(self) -> NDArray:
-        distances = np.zeros(self.num_qubits)
-
-        for qubit, target in enumerate(self.qubit_targets):
-            if target != -1:
-                qubit_node = self.qubit_to_node[qubit]
-                target_node = self.qubit_to_node[target]
-
-                distances[qubit] = self.distance_matrix[qubit_node, target_node]
-
-        return distances
