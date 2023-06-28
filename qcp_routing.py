@@ -100,11 +100,13 @@ def main():
                              noise_config=noise_config)
 
     try:
-        model = MaskablePPO.load(args.model_path, tensorboard_log='logs/routing')
-
+        model = MaskablePPO.load(args.model_path, tensorboard_log='logs/routing', stats_window_size=300)
         args.depth = model.observation_space['circuit'].shape[1]
-        vec_env = VecMonitor(SubprocVecEnv([env_fn] * args.envs))
-        model.set_env(vec_env)
+
+        # Only need to create vectorized environment when learning
+        if args.learn:
+            vec_env = VecMonitor(SubprocVecEnv([env_fn] * args.envs))
+            model.set_env(vec_env)
 
         reset = False
     except FileNotFoundError:
@@ -115,7 +117,8 @@ def main():
         }
 
         model = MaskablePPO(MaskableMultiInputActorCriticPolicy, vec_env, policy_kwargs=policy_kwargs, n_steps=n_steps,
-                            tensorboard_log='logs/routing', learning_rate=5e-5)
+                            tensorboard_log='logs/routing', learning_rate=5e-5, stats_window_size=300)
+
         args.learn = True
         reset = True
 
