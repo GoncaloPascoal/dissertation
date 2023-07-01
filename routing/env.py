@@ -1,10 +1,10 @@
-
+import copy
 import itertools
 from abc import ABC, abstractmethod
 from collections.abc import MutableMapping, Iterable
 from dataclasses import dataclass, field
 from math import e
-from typing import Optional, Tuple, Dict, Any, List, SupportsFloat, Iterator
+from typing import Optional, Tuple, Dict, Any, List, SupportsFloat, Iterator, Self
 
 import gymnasium as gym
 import numpy as np
@@ -161,6 +161,20 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self._reset_dag()
 
         return self._current_obs(), {}
+
+    def copy(self) -> Self:
+        env = copy.copy(self)
+
+        env.node_to_qubit = self.node_to_qubit.copy()
+        env.qubit_to_node = self.qubit_to_node.copy()
+
+        env.dag = self.dag.copy_empty_like()
+        env.dag.compose(self.dag)
+
+        env.routed_dag = self.routed_dag.copy_empty_like()
+        env.routed_dag.compose(self.routed_dag)
+
+        return env
 
     def generate_circuit(self):
         self.circuit = self.circuit_generator.generate()
@@ -362,16 +376,7 @@ class SequentialRoutingEnv(RoutingEnv, ABC):
         else:
             # BRIDGE action
             pair = self.bridge_pairs[action - self.num_edges]
-
-            try:
-                op_node, nodes = self._bridge_args(pair)
-            except TypeError:
-                # TODO: remove
-                print(self._current_obs())
-                print(dag_to_circuit(self.dag))
-                print(self.qubit_to_node, self.node_to_qubit)
-                print(action, self.action_masks())
-                raise
+            op_node, nodes = self._bridge_args(pair)
 
             self.dag.remove_op_node(op_node)
             self._bridge(*nodes)
@@ -379,7 +384,6 @@ class SequentialRoutingEnv(RoutingEnv, ABC):
 
         self._update_state()
         # reward += self._scheduling_reward
-
         # self._blocked_swap = action if is_swap and self._scheduling_reward == 0.0 else None
 
         return self._current_obs(), reward, self.terminated, False, {}
@@ -556,6 +560,11 @@ class SchedulingMap(MutableMapping[int, int]):
     def update_all(self, keys: Iterable[int], value: int = 1):
         self.update((k, value) for k in keys)
 
+    def copy(self) -> Self:
+        scheduling_map = copy.copy(self)
+        scheduling_map._map = self._map.copy()
+        return scheduling_map
+
 
 class LayeredRoutingEnv(RoutingEnv):
     def __init__(
@@ -629,6 +638,11 @@ class LayeredRoutingEnv(RoutingEnv):
 
         return mask
 
+    def copy(self) -> Self:
+        env = super().copy()
+        env.scheduling_map = self.scheduling_map.copy()
+        return env
+
     def _bridge(self, control: int, middle: int, target: int):
         super()._bridge(control, middle, target)
         self.scheduling_map.update_all((control, middle, target))
@@ -677,6 +691,11 @@ class QubitInteractionsRoutingEnv(LayeredRoutingEnv):
         }
 
         self.observation_space = spaces.Dict(self._obs_spaces())
+
+    def copy(self) -> Self:
+        env = super().copy()
+        env.qubit_interactions = self.qubit_interactions.copy()
+        return env
 
     def _obs_spaces(self) -> Dict[str, spaces.Space]:
         obs_spaces = super()._obs_spaces()
