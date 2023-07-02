@@ -77,7 +77,7 @@ class MctsState:
         self.children = [None] * num_actions
         self.action_masks = self.env.action_masks()
 
-        self.priors = torch.tensor(np.bitwise_not(self.action_masks) * -1e8)
+        self.prior_probabilities = torch.tensor(np.bitwise_not(self.action_masks) * -1e8)
 
     @property
     def is_terminal(self) -> bool:
@@ -85,7 +85,10 @@ class MctsState:
 
     def select(self) -> int:
         total_visits = torch.sum(self.num_visits).item()
-        uct: torch.Tensor = self.q_values + self.priors * sqrt(total_visits + 1e-3) / (self.num_visits + 1e-3)
+        uct: torch.Tensor = (
+            self.q_values +
+            self.prior_probabilities * sqrt(total_visits + 1e-3) / (self.num_visits + 1e-3)
+        )
         max_indices, = torch.where(uct == uct.max())
         return random.choice(max_indices).item()
 
