@@ -1,14 +1,58 @@
 
 import random
 from math import sqrt
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 import rustworkx as rx
 import torch
+from torch import nn
+from torch_geometric.nn import EdgeConv
 
 from routing.circuit_gen import CircuitGenerator
-from routing.env import LayeredRoutingEnv
+from routing.env import LayeredRoutingEnv, RoutingObsType
+
+
+class MctsGnn(nn.Module):
+    def __init__(self, env: LayeredRoutingEnv):
+        super().__init__()
+        coupling_map = env.coupling_map
+
+        mlp = nn.Sequential(
+            nn.Linear(2 * coupling_map.num_nodes(), 50),
+            nn.SiLU(),
+            nn.Linear(50, 10),
+            nn.SiLU(),
+            nn.Linear(10, 4),
+            nn.SiLU(),
+        )
+        self.edge_conv = EdgeConv(mlp)
+
+        self.value_net = nn.Sequential(
+            nn.Linear(4 * coupling_map.num_nodes() + coupling_map.num_nodes() + coupling_map.num_edges(), 64),
+            nn.SiLU(),
+            nn.Linear(64, 16),
+            nn.SiLU(),
+            nn.Linear(16, 1),
+        )
+        self.policy_net = nn.Sequential(
+            nn.Linear(4 * coupling_map.num_nodes() + coupling_map.num_edges(), env.action_space.n),
+        )
+
+        self.edges = torch.tensor(coupling_map.edge_list()).transpose(1, 0)
+
+    def forward(self, obs: RoutingObsType) -> Tuple[float, torch.Tensor]:
+        qubit_interactions = obs['qubit_interactions']
+        locked_nodes = obs['locked_nodes']
+
+        qubit_interactions = self.edge_conv(qubit_interactions, self.edges).view(-1)
+        value_input = torch.cat([qubit_interactions, locked_nodes])
+        policy_input = torch.cat([qubit_interactions, locked_nodes])
+
+        value = self.value_net(value_input).item()
+        policy = self.policy_net(policy_input)
+
+        return value, policy
 
 
 class MctsState:

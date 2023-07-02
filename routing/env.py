@@ -1,6 +1,7 @@
 import copy
 import itertools
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from collections.abc import MutableMapping, Iterable
 from dataclasses import dataclass, field
 from math import e
@@ -686,9 +687,10 @@ class QubitInteractionsRoutingEnv(LayeredRoutingEnv):
 
         self.max_interaction_depth = max_interaction_depth
 
-        self.qubit_interactions = {
-            (j, i): -1 for i in range(self.num_qubits) for j in range(i)
-        }
+        self.qubit_interactions = OrderedDict()
+        for i in range(self.num_qubits):
+            for j in range(i):
+                self.qubit_interactions[(j, i)] = -1
 
         self.observation_space = spaces.Dict(self._obs_spaces())
 
