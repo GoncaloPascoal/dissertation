@@ -605,7 +605,7 @@ class LayeredRoutingEnv(RoutingEnv):
 
             self.dag.remove_op_node(op_node)
             self._bridge(*nodes)
-            reward = -3.0
+            reward = -2.0
         else:
             # COMMIT action
             self._update_state()
