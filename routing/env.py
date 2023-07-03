@@ -6,7 +6,7 @@ from collections import OrderedDict
 from collections.abc import MutableMapping, Iterable
 from dataclasses import dataclass, field
 from math import e
-from typing import Optional, Tuple, Dict, Any, List, SupportsFloat, Iterator, Self, TypeVar, Generic
+from typing import Optional, Tuple, Dict, Any, List, SupportsFloat, Iterator, Self, TypeVar, Generic, Type
 
 import gymnasium as gym
 import numpy as np
@@ -29,21 +29,24 @@ class NoiseConfig:
     std: float
 
     recalibration_interval: int = field(default=16, kw_only=True)
-    min_log_reliability: float = field(default=-100, kw_only=True)
-    log_base: float = field(default=e, kw_only=True)
 
     def generate_error_rates(self, n: int) -> NDArray:
         return np.random.normal(self.mean, self.std, n).clip(0.0, 1.0)
 
-    def calculate_log_reliabilities(self, error_rates: NDArray) -> NDArray:
+    @staticmethod
+    def calculate_log_reliabilities(
+        error_rates: NDArray,
+        log_base: float = e,
+        min_log_reliability: float = -100,
+    ) -> NDArray:
         if np.any((error_rates < 0.0) | (error_rates > 1.0)):
             raise ValueError('Got invalid values for error rates')
 
         return np.where(
             error_rates < 1.0,
-            np.emath.logn(self.log_base, 1.0 - error_rates),
+            np.emath.logn(log_base, 1.0 - error_rates),
             -np.inf
-        ).clip(self.min_log_reliability)
+        ).clip(min_log_reliability)
 
 
 RoutingObsType = Dict[str, NDArray]
@@ -55,57 +58,50 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     """
     Base qubit routing environment.
 
+    :param circuit: Quantum circuit to compile.
     :param coupling_map: Graph representing the connectivity of the target device.
-    :param circuit_generator: Random circuit generator to be used during training.
     :param initial_mapping: Initial mapping from physical nodes to logical qubits. If ``None``, a random initial mapping
                             will be used for each training iteration.
     :param allow_bridge_gate: Allow the use of BRIDGE gates when routing.
-    :param noise_config: Noise configuration used to generate gate error rates.
+    :param error_rates: Array of two-qubit gate error rates. If ``None``, routing will be noise-unaware.
     :param obs_modules: Observation modules that define the key-value pairs in observations.
-    :param training: ``True`` if the environment is being used for training.
-    :param training_iterations: Number of episodes per generated circuit.
 
     :ivar node_to_qubit: Current mapping from physical nodes to logical qubits.
     :ivar qubit_to_node: Current mapping from logical qubits to physical nodes.
     :ivar routed_dag: ``DAGCircuit`` containing already routed gates.
-    :ivar error_rates: Array of two-qubit gate error rates.
     :ivar log_reliabilities: Array of logarithms of two-qubit gate reliabilities (``reliability = 1 - error_rate``)
-    :ivar iter: Current training iteration.
     """
 
     observation_space: spaces.Dict
     action_space: spaces.Discrete
 
-    initial_mapping: Optional[NDArray]
-    error_rates: NDArray
+    initial_mapping: NDArray
+    error_rates: Optional[NDArray]
+    obs_modules: List['ObsModule']
     log_reliabilities: NDArray
     log_reliabilities_map: Dict[Tuple[int, int], float]
 
     def __init__(
         self,
+        circuit: QuantumCircuit,
         coupling_map: rx.PyGraph,
-        circuit_generator: CircuitGenerator,
-        initial_mapping: Optional[NDArray] = None,
+        initial_mapping: NDArray,
         allow_bridge_gate: bool = True,
-        noise_config: Optional[NoiseConfig] = None,
+        error_rates: Optional[NDArray] = None,
         obs_modules: Optional[List['ObsModule']] = None,
-        training: bool = True,
-        training_iterations: int = 1,
     ):
-        if initial_mapping is not None and initial_mapping.shape != (coupling_map.num_nodes(),):
+        if initial_mapping.shape != (coupling_map.num_nodes(),):
             raise ValueError('Initial mapping has invalid shape for the provided coupling map')
 
-        if training_iterations < 1:
-            raise ValueError(f'Number of training iterations must be greater than zero, got {training_iterations}')
+        if error_rates is not None and error_rates.shape != (coupling_map.num_edges(),):
+            raise ValueError('Error rates have invalid shape for the provided coupling map')
 
+        self.circuit = circuit
         self.coupling_map = coupling_map
-        self.circuit_generator = circuit_generator
         self.initial_mapping = initial_mapping
         self.allow_bridge_gate = allow_bridge_gate
-        self.noise_config = noise_config
+        self.error_rates = error_rates
         self.obs_modules = [] if obs_modules is None else obs_modules
-        self.training = training
-        self.training_iterations = training_iterations
 
         # Computations using coupling map
         self.num_qubits = coupling_map.num_nodes()
@@ -123,17 +119,18 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
             self.bridge_pairs = []
 
         # State information
-        self.node_to_qubit = np.zeros(self.num_qubits, dtype=np.int32)
-        self.qubit_to_node = np.zeros(self.num_qubits, dtype=np.int32)
+        self.node_to_qubit = initial_mapping.copy()
+        self.qubit_to_node = np.zeros_like(self.node_to_qubit)
+        for node, qubit in enumerate(self.node_to_qubit):
+            self.qubit_to_node[qubit] = node
 
-        self.circuit = QuantumCircuit(self.num_qubits)
         self.dag = circuit_to_dag(self.circuit)
         self.routed_dag = self.dag.copy_empty_like()
 
         # Noise-awareness information
         if self.noise_aware:
             self.obs_modules.append(LogReliabilities())
-            self.calibrate(np.zeros(self.num_edges))
+            self.calibrate(self.error_rates)
 
         bridge_circuit = QuantumCircuit(3)
         for _ in range(2):
@@ -144,11 +141,9 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.bridge_gate.name = 'bridge'
         self.swap_gate = SwapGate()
 
-        self.iter = 0
-
     @property
     def noise_aware(self) -> bool:
-        return self.noise_config is not None
+        return self.error_rates is not None
 
     def reset(
         self,
@@ -156,18 +151,12 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         seed: Optional[int] = None,
         options: Optional[Dict[str, Any]] = None,
     ) -> Tuple[RoutingObsType, Dict[str, Any]]:
-        if self.training:
-            if self.noise_aware and self.iter % self.noise_config.recalibration_interval == 0:
-                self.recalibrate()
+        self.dag = circuit_to_dag(self.circuit)
+        self.routed_dag = self.dag.copy_empty_like()
 
-            if self.iter % self.training_iterations == 0:
-                self.generate_circuit()
+        self._reset_state()
 
-            self.iter += 1
-
-        self._reset_dag()
-
-        return self._current_obs(), {}
+        return self.current_obs(), {}
 
     def copy(self) -> Self:
         env = copy.copy(self)
@@ -183,9 +172,6 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
         return env
 
-    def generate_circuit(self):
-        self.circuit = self.circuit_generator.generate()
-
     def routed_circuit(self) -> QuantumCircuit:
         return dag_to_circuit(self.routed_dag)
 
@@ -197,7 +183,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         :param error_rates: Array of two-qubit gate error rates.
         """
         self.error_rates = error_rates.copy()
-        self.log_reliabilities = self.noise_config.calculate_log_reliabilities(error_rates)
+        self.log_reliabilities = NoiseConfig.calculate_log_reliabilities(error_rates)
 
         m = {}
         for edge, value in zip(self.edge_list, self.log_reliabilities):  # type: ignore
@@ -205,19 +191,6 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
             m[edge[::-1]] = value
 
         self.log_reliabilities_map = m
-
-    def recalibrate(self):
-        """
-        Performs calibration with random error rates determined by the noise configuration.
-        """
-        self.calibrate(self.noise_config.generate_error_rates(self.num_edges))
-
-    def set_random_initial_mapping(self):
-        """
-        Generates and sets a random permutation for the initial mapping. Afterward, all circuits will be
-        routed using this mapping.
-        """
-        self.initial_mapping = self._generate_random_mapping()
 
     @abstractmethod
     def action_masks(self) -> NDArray:
@@ -230,7 +203,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     def _obs_spaces(self) -> Dict[str, spaces.Space]:
         return {module.key(): module.space(self) for module in self.obs_modules}
 
-    def _current_obs(self) -> RoutingObsType:
+    def current_obs(self) -> RoutingObsType:
         return {module.key(): module.obs(self) for module in self.obs_modules}
 
     @property
@@ -281,23 +254,8 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.node_to_qubit[node_a], self.node_to_qubit[node_b] = qubit_b, qubit_a
         self.qubit_to_node[qubit_a], self.qubit_to_node[qubit_b] = node_b, node_a
 
-    def _generate_random_mapping(self) -> NDArray:
-        mapping = np.arange(self.num_qubits)
-        np.random.shuffle(mapping)
-        return mapping
-
-    def _reset_dag(self):
-        self.dag = circuit_to_dag(self.circuit)
-        self.routed_dag = self.dag.copy_empty_like()
-
-        self._reset_state()
-
     def _reset_state(self):
-        self.node_to_qubit = (
-            self._generate_random_mapping()
-            if self.initial_mapping is None
-            else self.initial_mapping.copy()
-        )
+        self.node_to_qubit = self.initial_mapping.copy()
 
         for node, qubit in enumerate(self.node_to_qubit):
             self.qubit_to_node[qubit] = node
@@ -332,19 +290,16 @@ class SequentialRoutingEnv(RoutingEnv):
 
     def __init__(
         self,
+        circuit: QuantumCircuit,
         coupling_map: rx.PyGraph,
-        circuit_generator: CircuitGenerator,
-        initial_mapping: Optional[NDArray] = None,
+        initial_mapping: NDArray,
         allow_bridge_gate: bool = True,
-        noise_config: Optional[NoiseConfig] = None,
+        error_rates: Optional[NDArray] = None,
         obs_modules: Optional[List['ObsModule']] = None,
-        training: bool = True,
-        training_iterations: int = 1,
         restrict_swaps_to_front_layer: bool = True,
         base_gate_reward: float = -1.0,
     ):
-        super().__init__(coupling_map, circuit_generator, initial_mapping, allow_bridge_gate, noise_config,
-                         obs_modules, training, training_iterations)
+        super().__init__(circuit, coupling_map, initial_mapping, allow_bridge_gate, error_rates, obs_modules)
 
         self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
         self.base_gate_reward = base_gate_reward
@@ -360,7 +315,7 @@ class SequentialRoutingEnv(RoutingEnv):
     def step(self, action: int) -> Tuple[RoutingObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
         if self.terminated:
             # Environment terminated immediately and does not require routing
-            return self._current_obs(), 0.0, True, False, {}
+            return self.current_obs(), 0.0, True, False, {}
 
         is_swap = action < self.num_edges
 
@@ -382,7 +337,7 @@ class SequentialRoutingEnv(RoutingEnv):
         # reward += self._scheduling_reward
         # self._blocked_swap = action if is_swap and self._scheduling_reward == 0.0 else None
 
-        return self._current_obs(), reward, self.terminated, False, {}
+        return self.current_obs(), reward, self.terminated, False, {}
 
     def action_masks(self) -> NDArray:
         mask = np.ones(self.action_space.n, dtype=bool)
@@ -460,20 +415,17 @@ class QcpRoutingEnv(SequentialRoutingEnv):
 
     def __init__(
         self,
+        circuit: QuantumCircuit,
         coupling_map: rx.PyGraph,
-        circuit_generator: CircuitGenerator,
+        initial_mapping: NDArray,
         depth: int,
-        initial_mapping: Optional[NDArray] = None,
         allow_bridge_gate: bool = True,
-        noise_config: Optional[NoiseConfig] = None,
-        training: bool = True,
-        training_iterations: int = 1,
+        error_rates: Optional[NDArray] = None,
         restrict_swaps_to_front_layer: bool = True,
         base_gate_reward: float = -1.0,
     ):
-        super().__init__(coupling_map, circuit_generator, initial_mapping, allow_bridge_gate, noise_config,
-                         [CircuitMatrix(depth)], training, training_iterations, restrict_swaps_to_front_layer,
-                         base_gate_reward)
+        super().__init__(circuit, coupling_map, initial_mapping, allow_bridge_gate, error_rates,
+                         [CircuitMatrix(depth)], restrict_swaps_to_front_layer, base_gate_reward)
 
 
 class SchedulingMap(MutableMapping[int, int]):
@@ -520,18 +472,16 @@ class SchedulingMap(MutableMapping[int, int]):
 class LayeredRoutingEnv(RoutingEnv):
     def __init__(
         self,
+        circuit: QuantumCircuit,
         coupling_map: rx.PyGraph,
-        circuit_generator: CircuitGenerator,
-        initial_mapping: Optional[NDArray] = None,
+        initial_mapping: NDArray,
         allow_bridge_gate: bool = True,
-        noise_config: Optional[NoiseConfig] = None,
+        error_rates: Optional[NDArray] = None,
         obs_modules: Optional[List['ObsModule']] = None,
-        training: bool = True,
-        training_iterations: int = 1,
         use_decomposed_actions: bool = False,
     ):
-        super().__init__(coupling_map, circuit_generator, initial_mapping, allow_bridge_gate,
-                         obs_modules, noise_config, training, training_iterations)
+        super().__init__(circuit, coupling_map, initial_mapping, allow_bridge_gate,
+                         obs_modules, error_rates)
 
         self.use_decomposed_actions = use_decomposed_actions
         self.scheduling_map = SchedulingMap()
@@ -564,7 +514,7 @@ class LayeredRoutingEnv(RoutingEnv):
             # COMMIT action
             self._update_state()
 
-        return self._current_obs(), reward, self.terminated, False, {}
+        return self.current_obs(), reward, self.terminated, False, {}
 
     def action_masks(self) -> NDArray:
         mask = np.ones(self.action_space.n, dtype=bool)
@@ -679,6 +629,117 @@ class LayeredRoutingEnv(RoutingEnv):
 RoutingEnvType = TypeVar('RoutingEnvType', bound=RoutingEnv)
 
 
+def _generate_random_mapping(num_qubits: int) -> NDArray:
+    mapping = np.arange(num_qubits)
+    np.random.shuffle(mapping)
+    return mapping
+
+
+class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
+    """
+    Wraps a :py:class:`RoutingEnv`, automatically generating circuits and gate error rates at fixed intervals to
+    help train deep learning algorithms.
+
+    :param coupling_map: Graph representing the connectivity of the target device.
+    :param circuit_generator: Random circuit generator to be used during training.
+    :param env_class: :py:class:`RoutingEnv` subclass to wrap.
+    :param noise_config: Noise configuration used to generate gate error rates.
+    :param training_iters: Number of episodes per generated circuit.
+
+    :ivar iter: Current training iteration.
+    """
+
+    env: RoutingEnv
+
+    def __init__(
+        self,
+        circuit_generator: CircuitGenerator,
+        coupling_map: rx.PyGraph,
+        env_class: Type[RoutingEnvType],
+        *args,
+        noise_config: Optional[NoiseConfig] = None,
+        training_iters: int = 1,
+        **kwargs,
+    ):
+        self.circuit_generator = circuit_generator
+        self.noise_config = noise_config
+        self.training_iters = training_iters
+
+        env = env_class(QuantumCircuit(), coupling_map, np.arange(coupling_map.num_nodes()), *args, **kwargs)
+        super().__init__(env)
+
+        self.iter = 0
+
+    @property
+    def noise_aware(self) -> bool:
+        return self.noise_config is not None
+
+    @property
+    def num_qubits(self) -> bool:
+        return self.env.num_qubits
+
+    @property
+    def num_edges(self) -> bool:
+        return self.env.num_edges
+
+    def reset(
+        self,
+        *,
+        seed: Optional[int] = None,
+        options: Optional[Dict[str, Any]] = None
+    ) -> Tuple[RoutingObsType, Dict[str, Any]]:
+        self.env.initial_mapping = _generate_random_mapping(self.num_qubits)
+
+        if self.iter % self.training_iters == 0:
+            self.env.circuit = self.circuit_generator.generate()
+
+        if self.noise_aware and self.iter % self.noise_config.recalibration_interval == 0:
+            error_rates = self.noise_config.generate_error_rates(self.num_edges)
+            self.env.calibrate(error_rates)
+
+        self.iter += 1
+
+        return super().reset(seed=seed, options=options)
+
+
+class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
+    env: RoutingEnv
+
+    def __init__(
+        self,
+        circuit_generator: CircuitGenerator,
+        coupling_map: rx.PyGraph,
+        env_class: Type[RoutingEnvType],
+        *args,
+        noise_config: Optional[NoiseConfig] = None,
+        evaluation_iters: int = 25,
+        **kwargs,
+    ):
+        self.circuit_generator = circuit_generator
+        self.evaluation_iters = evaluation_iters
+
+        initial_mapping = _generate_random_mapping(coupling_map.num_nodes())
+        error_rates = noise_config.generate_error_rates(coupling_map.num_edges()) if noise_config is not None else None
+
+        env = env_class(QuantumCircuit(), coupling_map, initial_mapping, *args, error_rates=error_rates, **kwargs)
+        super().__init__(env)
+
+        self.iter = 0
+
+    def reset(
+        self,
+        *,
+        seed: Optional[int] = None,
+        options: Optional[Dict[str, Any]] = None
+    ) -> Tuple[RoutingObsType, Dict[str, Any]]:
+        if self.iter % self.evaluation_iters == 0:
+            self.env.circuit = self.circuit_generator.generate()
+
+        self.iter += 1
+
+        return super().reset(seed=seed, options=options)
+
+
 class ObsModule(ABC, Generic[RoutingEnvType]):
     @staticmethod
     @abstractmethod
@@ -700,7 +761,8 @@ class LogReliabilities(ObsModule[RoutingEnv]):
         return 'log_reliabilities'
 
     def space(self, env: RoutingEnv) -> spaces.Box:
-        return spaces.Box(env.noise_config.min_log_reliability, 0.0, shape=env.log_reliabilities.shape)
+        # TODO: min_log_reliability
+        return spaces.Box(-100.0, 0.0, shape=env.log_reliabilities.shape)
 
     def obs(self, env: RoutingEnv) -> NDArray:
         return env.log_reliabilities.copy()

@@ -18,7 +18,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from tqdm.rich import tqdm
 
 from routing.circuit_gen import RandomCircuitGenerator
-from routing.env import QcpRoutingEnv, NoiseConfig
+from routing.env import QcpRoutingEnv, NoiseConfig, TrainingWrapper, EvaluationWrapper
 from utils import qubits_to_indices
 
 
@@ -86,7 +86,7 @@ def main():
     # Parameters
     n_steps = 2048
     training_iterations = 4
-    noise_config = NoiseConfig(1.0e-2, 3.0e-3, log_base=2.0)
+    noise_config = NoiseConfig(1.0e-2, 3.0e-3)
 
     g = t_topology()
     circuit_generator = RandomCircuitGenerator(g.num_nodes(), args.circuit_size, seed=args.seed)
@@ -95,9 +95,9 @@ def main():
         rx.visualization.mpl_draw(g, with_labels=True)
         plt.show()
 
-    def env_fn() -> QcpRoutingEnv:
-        return QcpRoutingEnv(g, circuit_generator, args.depth, training_iterations=training_iterations,
-                             noise_config=noise_config)
+    def env_fn() -> TrainingWrapper:
+        return TrainingWrapper(circuit_generator, g, QcpRoutingEnv, args.depth, noise_config=noise_config,
+                               training_iterations=training_iterations)
 
     try:
         model = MaskablePPO.load(args.model_path, tensorboard_log='logs/routing', stats_window_size=300)
@@ -130,14 +130,8 @@ def main():
         model.save(args.model_path)
         return
 
-    env = env_fn()
-    env.training = False
-    env.recalibrate()
-
-    # Generate a random initial mapping
-    # TODO: improve random generation to facilitate reproducibility
-    env.set_random_initial_mapping()
-    env.reset()
+    env = EvaluationWrapper(circuit_generator, g, QcpRoutingEnv, args.depth, noise_config=noise_config,
+                            evaluation_iters=args.iters)
     initial_layout = env.qubit_to_node.copy().tolist()
 
     reliability_map = {}
@@ -163,13 +157,11 @@ def main():
     print('[b yellow]  EVALUATION[/b yellow]')
 
     for _ in tqdm(range(args.eval_circuits)):
-        env.generate_circuit()
-        obs, _ = env.reset()
-
         best_reward = -inf
         routed_circuit = env.circuit.copy_empty_like()
 
-        for _ in range(args.iters):
+        for _ in range(env.evaluation_iters):
+            obs, _ = env.reset()
             terminated = False
             total_reward = 0.0
 
@@ -183,8 +175,6 @@ def main():
             if total_reward > best_reward:
                 best_reward = total_reward
                 routed_circuit = env.routed_circuit()
-
-            obs, _ = env.reset()
 
         t_qc = transpile(env.circuit, coupling_map=coupling_map, initial_layout=initial_layout,
                          routing_method=args.routing_method, basis_gates=['u', 'swap', 'cx'], optimization_level=0,
