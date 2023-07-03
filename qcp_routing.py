@@ -130,8 +130,9 @@ def main():
         model.save(args.model_path)
         return
 
-    env = EvaluationWrapper(circuit_generator, g, QcpRoutingEnv, args.depth, noise_config=noise_config,
-                            evaluation_iters=args.iters)
+    eval_env = EvaluationWrapper(circuit_generator, g, QcpRoutingEnv, args.depth, noise_config=noise_config,
+                                 evaluation_iters=args.iters)
+    env = eval_env.env
     initial_layout = env.qubit_to_node.copy().tolist()
 
     reliability_map = {}
@@ -160,8 +161,8 @@ def main():
         best_reward = -inf
         routed_circuit = env.circuit.copy_empty_like()
 
-        for _ in range(env.evaluation_iters):
-            obs, _ = env.reset()
+        for _ in range(eval_env.evaluation_iters):
+            obs, _ = eval_env.reset()
             terminated = False
             total_reward = 0.0
 

@@ -145,6 +145,10 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     def noise_aware(self) -> bool:
         return self.error_rates is not None
 
+    @property
+    def terminated(self) -> bool:
+        return self.dag.size() == 0
+
     def reset(
         self,
         *,
@@ -157,23 +161,6 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self._reset_state()
 
         return self.current_obs(), {}
-
-    def copy(self) -> Self:
-        env = copy.copy(self)
-
-        env.node_to_qubit = self.node_to_qubit.copy()
-        env.qubit_to_node = self.qubit_to_node.copy()
-
-        env.dag = self.dag.copy_empty_like()
-        env.dag.compose(self.dag)
-
-        env.routed_dag = self.routed_dag.copy_empty_like()
-        env.routed_dag.compose(self.routed_dag)
-
-        return env
-
-    def routed_circuit(self) -> QuantumCircuit:
-        return dag_to_circuit(self.routed_dag)
 
     def calibrate(self, error_rates: NDArray):
         """
@@ -192,6 +179,26 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
         self.log_reliabilities_map = m
 
+    def copy(self) -> Self:
+        env = copy.copy(self)
+
+        env.node_to_qubit = self.node_to_qubit.copy()
+        env.qubit_to_node = self.qubit_to_node.copy()
+
+        env.dag = self.dag.copy_empty_like()
+        env.dag.compose(self.dag)
+
+        env.routed_dag = self.routed_dag.copy_empty_like()
+        env.routed_dag.compose(self.routed_dag)
+
+        return env
+
+    def current_obs(self) -> RoutingObsType:
+        return {module.key(): module.obs(self) for module in self.obs_modules}
+
+    def routed_circuit(self) -> QuantumCircuit:
+        return dag_to_circuit(self.routed_dag)
+
     @abstractmethod
     def action_masks(self) -> NDArray:
         raise NotImplementedError
@@ -202,13 +209,6 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
     def _obs_spaces(self) -> Dict[str, spaces.Space]:
         return {module.key(): module.space(self) for module in self.obs_modules}
-
-    def current_obs(self) -> RoutingObsType:
-        return {module.key(): module.obs(self) for module in self.obs_modules}
-
-    @property
-    def terminated(self) -> bool:
-        return self.dag.size() == 0
 
     def _schedule_gates(self, gates: GateSchedulingList):
         for op_node, nodes in gates:
@@ -242,6 +242,18 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
         self.routed_dag.apply_operation_back(self.bridge_gate, qargs)
 
+    def _bridge_args(self, pair: Tuple[int, int]) -> Optional[BridgeArgs]:
+        for op_node in self.dag.front_layer():
+            if isinstance(op_node.op, CXGate):
+                indices = qubits_to_indices(self.circuit, op_node.qargs)
+                nodes = tuple(self.qubit_to_node[i] for i in indices)
+
+                if tuple(sorted(nodes)) == pair:
+                    control, target = nodes
+                    return op_node, tuple(self.shortest_paths[control][target])
+
+        return None
+
     def _swap(self, edge: Tuple[int, int]):
         qargs = indices_to_qubits(self.circuit, edge)
 
@@ -261,18 +273,6 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
             self.qubit_to_node[qubit] = node
 
         self._update_state()
-
-    def _bridge_args(self, pair: Tuple[int, int]) -> Optional[BridgeArgs]:
-        for op_node in self.dag.front_layer():
-            if isinstance(op_node.op, CXGate):
-                indices = qubits_to_indices(self.circuit, op_node.qargs)
-                nodes = tuple(self.qubit_to_node[i] for i in indices)
-
-                if tuple(sorted(nodes)) == pair:
-                    control, target = nodes
-                    return op_node, tuple(self.shortest_paths[control][target])
-
-        return None
 
 
 class SequentialRoutingEnv(RoutingEnv):
@@ -480,8 +480,7 @@ class LayeredRoutingEnv(RoutingEnv):
         obs_modules: Optional[List['ObsModule']] = None,
         use_decomposed_actions: bool = False,
     ):
-        super().__init__(circuit, coupling_map, initial_mapping, allow_bridge_gate,
-                         obs_modules, error_rates)
+        super().__init__(circuit, coupling_map, initial_mapping, allow_bridge_gate, error_rates, obs_modules)
 
         self.use_decomposed_actions = use_decomposed_actions
         self.scheduling_map = SchedulingMap()
@@ -569,7 +568,9 @@ class LayeredRoutingEnv(RoutingEnv):
 
     def _update_state(self):
         self.scheduling_map.decrement()
-        self._schedule_gates(self._schedulable_gates(only_front_layer=True))
+
+        gates = self._schedulable_gates(only_front_layer=True)
+        self._schedule_gates(gates)
 
         # edge_vector_idx = self.diameter + 1
         #
