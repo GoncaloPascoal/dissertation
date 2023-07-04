@@ -70,6 +70,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     :ivar qubit_to_node: Current mapping from logical qubits to physical nodes.
     :ivar routed_dag: ``DAGCircuit`` containing already routed gates.
     :ivar log_reliabilities: Array of logarithms of two-qubit gate reliabilities (``reliability = 1 - error_rate``)
+    :ivar log_reliabilities_map: Dictionary that maps edges to their corresponding log reliability values.
     """
 
     observation_space: spaces.Dict
@@ -180,6 +181,10 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.log_reliabilities_map = m
 
     def copy(self) -> Self:
+        """
+        Returns a copy of the environment. Attributes that are not mutated when stepping through the environment are
+        copied by reference; other attributes are copied by value.
+        """
         env = copy.copy(self)
 
         env.node_to_qubit = self.node_to_qubit.copy()
@@ -201,6 +206,9 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
     @abstractmethod
     def action_masks(self) -> NDArray:
+        """
+        Returns a boolean NumPy array where the ith element is true if the ith action is valid in the current state.
+        """
         raise NotImplementedError
 
     @abstractmethod
