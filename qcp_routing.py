@@ -1,6 +1,5 @@
 
 import functools
-import multiprocessing
 import operator
 from argparse import ArgumentParser
 from math import inf
@@ -14,7 +13,7 @@ from rich import print
 from rustworkx.visualization import mpl_draw
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableMultiInputActorCriticPolicy
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
+from stable_baselines3.common.vec_env import VecMonitor, DummyVecEnv
 from tqdm.rich import tqdm
 
 from routing.circuit_gen import RandomCircuitGenerator
@@ -64,15 +63,17 @@ def main():
 
     parser.add_argument('-m', '--model', metavar='M', help='name of the model', required=True)
     parser.add_argument('-l', '--learn', action='store_true', help='whether or not to train the agent')
-    parser.add_argument('-t', '--training-iters', metavar='I', help='training iterations per environment', default=50,
+    parser.add_argument('-e', '--envs', metavar='E', help='number of environments (for vectorization)', default=12,
                         type=int)
-    parser.add_argument('-e', '--envs', metavar='E', help='number of environments (for vectorization)',
-                        default=multiprocessing.cpu_count(), type=int)
     parser.add_argument('-r', '--routing-method', choices=['basic', 'stochastic', 'sabre'],
                         help='routing method for Qiskit compiler', default='sabre')
     parser.add_argument('-d', '--depth', metavar='D', help='depth of circuit observations', default=8, type=int)
-    parser.add_argument('-i', '--iters', metavar='I', help='routing iterations for evaluation', default=20, type=int)
-    parser.add_argument('--eval-circuits', metavar='C', help='number of evaluation circuits', default=100, type=int)
+    parser.add_argument('--learning-iters', metavar='I', help='learning iterations', default=50, type=int)
+    parser.add_argument('--training-iters', metavar='I', help='training episodes per circuit', default=4, type=int)
+    parser.add_argument('--evaluation-iters', metavar='I', help='evaluation episodes per circuit', default=20,
+                        type=int)
+    parser.add_argument('--evaluation-circuits', metavar='C', help='number of evaluation circuits', default=100,
+                        type=int)
     parser.add_argument('--circuit-size', metavar='S', help='number of gates in random circuits', default=16, type=int)
     parser.add_argument('--show-topology', action='store_true', help='show circuit topology')
     parser.add_argument('--seed', metavar='S', help='seed for random number generation', type=int)
@@ -85,7 +86,6 @@ def main():
 
     # Parameters
     n_steps = 2048
-    training_iterations = 4
     noise_config = NoiseConfig(1.0e-2, 3.0e-3)
 
     g = t_topology()
@@ -97,7 +97,7 @@ def main():
 
     def env_fn() -> TrainingWrapper:
         return TrainingWrapper(circuit_generator, g, QcpRoutingEnv, args.depth, noise_config=noise_config,
-                               training_iterations=training_iterations)
+                               training_iters=args.training_iters)
 
     try:
         model = MaskablePPO.load(args.model_path, tensorboard_log='logs/routing', stats_window_size=300)
@@ -105,12 +105,12 @@ def main():
 
         # Only need to create vectorized environment when learning
         if args.learn:
-            vec_env = VecMonitor(SubprocVecEnv([env_fn] * args.envs))
+            vec_env = VecMonitor(DummyVecEnv([env_fn] * args.envs))
             model.set_env(vec_env)
 
         reset = False
     except FileNotFoundError:
-        vec_env = VecMonitor(SubprocVecEnv([env_fn] * args.envs))
+        vec_env = VecMonitor(DummyVecEnv([env_fn] * args.envs))
         policy_kwargs = {
             'net_arch': args.net_arch,
             'activation_fn': nn.SiLU,
@@ -125,13 +125,13 @@ def main():
     model.set_random_seed(args.seed)
 
     if args.learn:
-        model.learn(args.envs * args.training_iters * n_steps, progress_bar=True, tb_log_name='ppo',
+        model.learn(args.envs * args.learning_iters * n_steps, progress_bar=True, tb_log_name='ppo',
                     reset_num_timesteps=reset)
         model.save(args.model_path)
         return
 
     eval_env = EvaluationWrapper(circuit_generator, g, QcpRoutingEnv, args.depth, noise_config=noise_config,
-                                 evaluation_iters=args.iters)
+                                 evaluation_iters=args.evaluation_iters)
     env = eval_env.env
     initial_layout = env.qubit_to_node.copy().tolist()
 
@@ -157,11 +157,11 @@ def main():
 
     print('[b yellow]  EVALUATION[/b yellow]')
 
-    for _ in tqdm(range(args.eval_circuits)):
+    for _ in tqdm(range(args.evaluation_circuits)):
         best_reward = -inf
         routed_circuit = env.circuit.copy_empty_like()
 
-        for _ in range(eval_env.evaluation_iters):
+        for _ in range(args.evaluation_iters):
             obs, _ = eval_env.reset()
             terminated = False
             total_reward = 0.0
@@ -203,20 +203,20 @@ def main():
         avg_reliability_qiskit += reliability(t_qc)
 
     # Calculate averages
-    avg_episode_reward /= args.eval_circuits
+    avg_episode_reward /= args.evaluation_circuits
 
-    avg_swaps_rl /= args.eval_circuits
-    avg_bridges_rl /= args.eval_circuits
-    avg_swaps_qiskit /= args.eval_circuits
+    avg_swaps_rl /= args.evaluation_circuits
+    avg_bridges_rl /= args.evaluation_circuits
+    avg_swaps_qiskit /= args.evaluation_circuits
 
-    avg_cnots_rl /= args.eval_circuits
-    avg_cnots_qiskit /= args.eval_circuits
+    avg_cnots_rl /= args.evaluation_circuits
+    avg_cnots_qiskit /= args.evaluation_circuits
 
-    avg_depth_rl /= args.eval_circuits
-    avg_depth_qiskit /= args.eval_circuits
+    avg_depth_rl /= args.evaluation_circuits
+    avg_depth_qiskit /= args.evaluation_circuits
 
-    avg_reliability_rl /= args.eval_circuits
-    avg_reliability_qiskit /= args.eval_circuits
+    avg_reliability_rl /= args.evaluation_circuits
+    avg_reliability_qiskit /= args.evaluation_circuits
 
     avg_added_cnots_rl = avg_cnots_rl - args.circuit_size
     avg_added_cnots_qiskit = avg_cnots_qiskit - args.circuit_size

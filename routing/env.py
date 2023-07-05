@@ -227,7 +227,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     def _schedulable_gates(self, only_front_layer: bool = False) -> GateSchedulingList:
         gates = []
         layers = [self.dag.front_layer()] if only_front_layer else dag_layers(self.dag)
-        stop = False
+        locked_nodes = set()
 
         for layer in layers:
             for op_node in layer:
@@ -235,12 +235,10 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
                 nodes = tuple(self.qubit_to_node[i] for i in indices)
 
                 if len(nodes) != 2 or self.coupling_map.has_edge(nodes[0], nodes[1]):
-                    gates.append((op_node, nodes))
+                    if not locked_nodes.intersection(nodes):
+                        gates.append((op_node, nodes))
                 else:
-                    stop = True
-
-            if stop:
-                break
+                    locked_nodes.update(nodes)
 
         return gates
 
@@ -335,14 +333,20 @@ class SequentialRoutingEnv(RoutingEnv):
         else:
             # BRIDGE action
             pair = self.bridge_pairs[action - self.num_edges]
-            op_node, nodes = self._bridge_args(pair)
+            args = self._bridge_args(pair)
 
-            self.dag.remove_op_node(op_node)
-            self._bridge(*nodes)
-            reward = self._bridge_reward(*nodes)
+            if args is not None:
+                op_node, nodes = args
+
+                self.dag.remove_op_node(op_node)
+                self._bridge(*nodes)
+                reward = self._bridge_reward(*nodes)
+            else:
+                print('Invalid BRIDGE action was selected')
+                reward = 0.0
 
         self._update_state()
-        # reward += self._scheduling_reward
+        reward += self._scheduling_reward
         # self._blocked_swap = action if is_swap and self._scheduling_reward == 0.0 else None
 
         return self.current_obs(), reward, self.terminated, False, {}
@@ -375,12 +379,6 @@ class SequentialRoutingEnv(RoutingEnv):
         ]
         mask[invalid_bridge_actions] = False
 
-        # TODO: remove
-        if np.all(mask == False):
-            print(dag_to_circuit(self.dag))
-            print(self.node_to_qubit, self.qubit_to_node)
-            print(self.terminated)
-
         return mask
 
     def _update_state(self):
@@ -389,8 +387,9 @@ class SequentialRoutingEnv(RoutingEnv):
         self._scheduling_reward = sum(self._gate_reward(nodes) for _, nodes in gates if len(nodes) == 2)
 
     def _gate_reward(self, edge: Tuple[int, int]) -> float:
+        # TODO: refine positive component of gate reward
         if self.noise_aware:
-            return self.log_reliabilities_map[edge]
+            return self.log_reliabilities_map[edge] - np.emath.logn(e, 0.98)
         else:
             return self.base_gate_reward
 
@@ -405,7 +404,7 @@ class SequentialRoutingEnv(RoutingEnv):
             return 2.0 * (
                 self.log_reliabilities_map[(middle, target)] +
                 self.log_reliabilities_map[(control, middle)]
-            )
+            ) - np.emath.logn(e, 0.98)
         else:
             return 4.0 * self.base_gate_reward
 
@@ -674,7 +673,10 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         self.noise_config = noise_config
         self.training_iters = training_iters
 
-        env = env_class(QuantumCircuit(), coupling_map, np.arange(coupling_map.num_nodes()), *args, **kwargs)
+        initial_mapping = np.arange(coupling_map.num_nodes())
+        error_rates = self.noise_config.generate_error_rates(coupling_map.num_edges())
+
+        env = env_class(QuantumCircuit(), coupling_map, initial_mapping, *args, error_rates=error_rates, **kwargs)
         super().__init__(env)
 
         self.iter = 0
@@ -684,11 +686,11 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         return self.noise_config is not None
 
     @property
-    def num_qubits(self) -> bool:
+    def num_qubits(self) -> int:
         return self.env.num_qubits
 
     @property
-    def num_edges(self) -> bool:
+    def num_edges(self) -> int:
         return self.env.num_edges
 
     def reset(
