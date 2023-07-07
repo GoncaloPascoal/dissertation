@@ -6,7 +6,7 @@ from collections import OrderedDict
 from collections.abc import MutableMapping, Iterable
 from dataclasses import dataclass, field
 from math import e
-from typing import Optional, Tuple, Dict, Any, List, SupportsFloat, Iterator, Self, TypeVar, Generic, Type
+from typing import Optional, Tuple, Dict, Any, List, SupportsFloat, Iterator, Self, TypeVar, Generic, Type, TypeAlias
 
 import gymnasium as gym
 import numpy as np
@@ -49,9 +49,9 @@ class NoiseConfig:
         ).clip(min_log_reliability)
 
 
-RoutingObsType = Dict[str, NDArray]
-GateSchedulingList = List[Tuple[DAGOpNode, Tuple[int, ...]]]
-BridgeArgs = Tuple[DAGOpNode, Tuple[int, int, int]]
+RoutingObsType: TypeAlias = Dict[str, NDArray]
+GateSchedulingList: TypeAlias = List[Tuple[DAGOpNode, Tuple[int, ...]]]
+BridgeArgs: TypeAlias = Tuple[DAGOpNode, Tuple[int, int, int]]
 
 
 class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
@@ -142,6 +142,9 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.bridge_gate.name = 'bridge'
         self.swap_gate = SwapGate()
 
+        self._num_scheduled_2q_gates = 0
+        self._scheduling_reward = 0.0
+
     @property
     def noise_aware(self) -> bool:
         return self.error_rates is not None
@@ -224,6 +227,9 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
             self.routed_dag.apply_operation_back(op_node.op, qargs)
             self.dag.remove_op_node(op_node)
 
+        self._num_scheduled_2q_gates = len(gates)
+        self._scheduling_reward = sum(self._gate_reward(nodes) for _, nodes in gates if len(nodes) == 2)
+
     def _schedulable_gates(self, only_front_layer: bool = False) -> GateSchedulingList:
         gates = []
         layers = [self.dag.front_layer()] if only_front_layer else dag_layers(self.dag)
@@ -272,6 +278,28 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.node_to_qubit[node_a], self.node_to_qubit[node_b] = qubit_b, qubit_a
         self.qubit_to_node[qubit_a], self.qubit_to_node[qubit_b] = node_b, node_a
 
+    def _gate_reward(self, edge: Tuple[int, int]) -> float:
+        # TODO: refine positive component of gate reward
+        if self.noise_aware:
+            return self.log_reliabilities_map[edge] - np.emath.logn(e, 0.98)
+
+        return 1.0
+
+    def _swap_reward(self, edge: Tuple[int, int]) -> float:
+        if self.noise_aware:
+            return 3.0 * self.log_reliabilities_map[edge]
+
+        return -3.0
+
+    def _bridge_reward(self, control: int, middle: int, target: int) -> float:
+        if self.noise_aware:
+            return 2.0 * (
+                self.log_reliabilities_map[(middle, target)] +
+                self.log_reliabilities_map[(control, middle)]
+            ) - np.emath.logn(e, 0.98)
+
+        return -2.0
+
     def _reset_state(self):
         self.node_to_qubit = self.initial_mapping.copy()
 
@@ -284,12 +312,9 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 class SequentialRoutingEnv(RoutingEnv):
     """
     Sequential routing environment, where SWAP and BRIDGE operations are iteratively added to the routed circuit.
-    Subclasses should override the :py:meth:`_current_obs` and :py:meth:`_obs_spaces` methods to provide their
-    desired observation representations.
 
     :param restrict_swaps_to_front_layer: Restrict SWAP operations to edges involving qubits that are part of two-qubit
         operations in the front (first) layer of the original circuit.
-    :param base_gate_reward: Base reward for scheduling a two-qubit gate when the environment isn't noise-aware.
     """
 
     _blocked_swap: Optional[int]
@@ -303,15 +328,12 @@ class SequentialRoutingEnv(RoutingEnv):
         error_rates: Optional[NDArray] = None,
         obs_modules: Optional[List['ObsModule']] = None,
         restrict_swaps_to_front_layer: bool = True,
-        base_gate_reward: float = -1.0,
     ):
         super().__init__(circuit, coupling_map, initial_mapping, allow_bridge_gate, error_rates, obs_modules)
 
         self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
-        self.base_gate_reward = base_gate_reward
 
         self._blocked_swap = None
-        self._scheduling_reward = 0.0
 
         self.observation_space = spaces.Dict(self._obs_spaces())
 
@@ -323,9 +345,9 @@ class SequentialRoutingEnv(RoutingEnv):
             # Environment terminated immediately and does not require routing
             return self.current_obs(), 0.0, True, False, {}
 
-        is_swap = action < self.num_edges
+        action_is_swap = action < self.num_edges
 
-        if is_swap:
+        if action_is_swap:
             # SWAP action
             edge = self.edge_list[action]
             self._swap(edge)
@@ -347,7 +369,7 @@ class SequentialRoutingEnv(RoutingEnv):
 
         self._update_state()
         reward += self._scheduling_reward
-        # self._blocked_swap = action if is_swap and self._scheduling_reward == 0.0 else None
+        self._blocked_swap = action if action_is_swap and self._num_scheduled_2q_gates == 0 else None
 
         return self.current_obs(), reward, self.terminated, False, {}
 
@@ -369,6 +391,7 @@ class SequentialRoutingEnv(RoutingEnv):
             ]
             mask[invalid_swap_actions] = False
 
+        # Disallow redundant consecutive SWAPs
         if self._blocked_swap is not None:
             mask[self._blocked_swap] = False
 
@@ -384,29 +407,6 @@ class SequentialRoutingEnv(RoutingEnv):
     def _update_state(self):
         gates = self._schedulable_gates()
         self._schedule_gates(gates)
-        self._scheduling_reward = sum(self._gate_reward(nodes) for _, nodes in gates if len(nodes) == 2)
-
-    def _gate_reward(self, edge: Tuple[int, int]) -> float:
-        # TODO: refine positive component of gate reward
-        if self.noise_aware:
-            return self.log_reliabilities_map[edge] - np.emath.logn(e, 0.98)
-        else:
-            return self.base_gate_reward
-
-    def _swap_reward(self, edge: Tuple[int, int]) -> float:
-        if self.noise_aware:
-            return 3.0 * self.log_reliabilities_map[edge]
-        else:
-            return 3.0 * self.base_gate_reward
-
-    def _bridge_reward(self, control: int, middle: int, target: int) -> float:
-        if self.noise_aware:
-            return 2.0 * (
-                self.log_reliabilities_map[(middle, target)] +
-                self.log_reliabilities_map[(control, middle)]
-            ) - np.emath.logn(e, 0.98)
-        else:
-            return 4.0 * self.base_gate_reward
 
 
 class QcpRoutingEnv(SequentialRoutingEnv):
@@ -429,10 +429,9 @@ class QcpRoutingEnv(SequentialRoutingEnv):
         allow_bridge_gate: bool = True,
         error_rates: Optional[NDArray] = None,
         restrict_swaps_to_front_layer: bool = True,
-        base_gate_reward: float = -1.0,
     ):
         super().__init__(circuit, coupling_map, initial_mapping, allow_bridge_gate, error_rates,
-                         [CircuitMatrix(depth)], restrict_swaps_to_front_layer, base_gate_reward)
+                         [CircuitMatrix(depth)], restrict_swaps_to_front_layer)
 
 
 class SchedulingMap(MutableMapping[int, int]):
@@ -471,9 +470,7 @@ class SchedulingMap(MutableMapping[int, int]):
         self.update((k, value) for k in keys)
 
     def copy(self) -> Self:
-        scheduling_map = copy.copy(self)
-        scheduling_map._map = self._map.copy()
-        return scheduling_map
+        return copy.deepcopy(self)
 
 
 class LayeredRoutingEnv(RoutingEnv):
@@ -499,15 +496,12 @@ class LayeredRoutingEnv(RoutingEnv):
         self.action_space = spaces.Discrete(num_actions)
 
     def step(self, action: int) -> Tuple[RoutingObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
-        # TODO: figure out how to implement rewards (maybe extract rewards to superclass)
-        reward = 0.0
-
         if action < self.num_edges:
             # SWAP action
             edge = self.edge_list[action]
 
             self._swap(edge)
-            reward = -3.0
+            reward = self._swap_reward(edge)
         elif action < self.num_edges + len(self.bridge_pairs):
             # BRIDGE action
             pair = self.bridge_pairs[action - self.num_edges]
@@ -515,10 +509,11 @@ class LayeredRoutingEnv(RoutingEnv):
 
             self.dag.remove_op_node(op_node)
             self._bridge(*nodes)
-            reward = -2.0
+            reward = self._bridge_reward(*nodes)
         else:
             # COMMIT action
             self._update_state()
+            reward = self._scheduling_reward
 
         return self.current_obs(), reward, self.terminated, False, {}
 
