@@ -82,6 +82,7 @@ class MctsState:
         self.num_visits = torch.zeros(num_actions, dtype=torch.int32)
         self.children = [None] * num_actions
         self.action_mask = self.env.action_masks()
+        self.inf_action_mask = torch.tensor(np.where(self.action_mask, 0.0, -np.inf))
 
         # TODO: prior probabilities
         self.model.eval()
@@ -107,7 +108,7 @@ class MctsState:
         return random.choice(max_indices).item()
 
     def select_q(self) -> int:
-        q_masked: torch.Tensor = self.q_values + torch.tensor(np.where(self.action_mask, 0.0, -np.inf))
+        q_masked: torch.Tensor = self.q_values + self.inf_action_mask
         max_indices, = torch.where(q_masked == q_masked.max())
         return random.choice(max_indices).item()
 

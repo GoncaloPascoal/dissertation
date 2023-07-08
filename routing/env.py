@@ -14,6 +14,7 @@ import rustworkx as rx
 from gymnasium import spaces
 from nptyping import NDArray
 from qiskit import QuantumCircuit
+from qiskit.circuit import Qubit, Operation
 from qiskit.circuit.library import SwapGate, CXGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGOpNode
@@ -68,7 +69,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
     :ivar node_to_qubit: Current mapping from physical nodes to logical qubits.
     :ivar qubit_to_node: Current mapping from logical qubits to physical nodes.
-    :ivar routed_dag: ``DAGCircuit`` containing already routed gates.
+    :ivar routed_gates: List of already routed gates, including additional SWAP and BRIDGE operations.
     :ivar log_reliabilities: Array of logarithms of two-qubit gate reliabilities (``reliability = 1 - error_rate``)
     :ivar log_reliabilities_map: Dictionary that maps edges to their corresponding log reliability values.
     """
@@ -79,6 +80,8 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     initial_mapping: NDArray
     error_rates: Optional[NDArray]
     obs_modules: List['ObsModule']
+
+    routed_gates: List[Tuple[Operation, Tuple[Qubit, ...]]]
     log_reliabilities: NDArray
     log_reliabilities_map: Dict[Tuple[int, int], float]
 
@@ -126,7 +129,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
             self.qubit_to_node[qubit] = node
 
         self.dag = circuit_to_dag(self.circuit)
-        self.routed_dag = self.dag.copy_empty_like()
+        self.routed_gates = []
 
         # Noise-awareness information
         if self.noise_aware:
@@ -160,7 +163,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         options: Optional[Dict[str, Any]] = None,
     ) -> Tuple[RoutingObsType, Dict[str, Any]]:
         self.dag = circuit_to_dag(self.circuit)
-        self.routed_dag = self.dag.copy_empty_like()
+        self.routed_gates = []
 
         self._reset_state()
 
@@ -196,8 +199,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         env.dag = self.dag.copy_empty_like()
         env.dag.compose(self.dag)
 
-        env.routed_dag = self.routed_dag.copy_empty_like()
-        env.routed_dag.compose(self.routed_dag)
+        env.routed_gates = self.routed_gates.copy()
 
         return env
 
@@ -205,7 +207,10 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         return {module.key(): module.obs(self) for module in self.obs_modules}
 
     def routed_circuit(self) -> QuantumCircuit:
-        return dag_to_circuit(self.routed_dag)
+        routed_dag = self.dag.copy_empty_like()
+        for op, qargs in self.routed_gates:
+            routed_dag.apply_operation_back(op, qargs)
+        return dag_to_circuit(routed_dag)
 
     @abstractmethod
     def action_masks(self) -> NDArray:
@@ -224,7 +229,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     def _schedule_gates(self, gates: GateSchedulingList):
         for op_node, nodes in gates:
             qargs = indices_to_qubits(self.circuit, nodes)
-            self.routed_dag.apply_operation_back(op_node.op, qargs)
+            self.routed_gates.append((op_node.op, qargs))
             self.dag.remove_op_node(op_node)
 
         self._num_scheduled_2q_gates = len(gates)
@@ -252,7 +257,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         indices = (control, middle, target)
         qargs = indices_to_qubits(self.circuit, indices)
 
-        self.routed_dag.apply_operation_back(self.bridge_gate, qargs)
+        self.routed_gates.append((self.bridge_gate, qargs))
 
     def _bridge_args(self, pair: Tuple[int, int]) -> Optional[BridgeArgs]:
         for op_node in self.dag.front_layer():
@@ -269,7 +274,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     def _swap(self, edge: Tuple[int, int]):
         qargs = indices_to_qubits(self.circuit, edge)
 
-        self.routed_dag.apply_operation_back(self.swap_gate, qargs)
+        self.routed_gates.append((self.swap_gate, qargs))
 
         # Update mappings
         node_a, node_b = edge

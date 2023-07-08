@@ -86,7 +86,7 @@ def main():
 
     # Parameters
     n_steps = 2048
-    noise_config = NoiseConfig(1.0e-2, 3.0e-3)
+    noise_config = NoiseConfig(1e-2, 3e-3)
 
     g = t_topology()
     circuit_generator = RandomCircuitGenerator(g.num_nodes(), args.circuit_size, seed=args.seed)
