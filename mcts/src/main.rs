@@ -43,12 +43,32 @@ impl State {
     fn is_terminal(&self) -> bool {
         self.gates.is_empty()
     }
+
+    fn action_mask(&self, coupling_map: &BTreeMap<(usize, usize), f64>) -> Vec<bool> {
+        let num_actions = coupling_map.len() + 1;
+        let commit_action = num_actions - 1;
+
+        let mut mask = vec![true; num_actions];
+
+        for (i, &edge) in coupling_map.keys().enumerate() {
+            if self.locked_nodes[edge.0] != 0 || self.locked_nodes[edge.1] != 0 {
+                mask[i] = false;
+            }
+        }
+
+        if self.locked_nodes.iter().all(|&n| n == 0) {
+            mask[commit_action] = false;
+        }
+
+        mask
+    }
 }
 
 #[derive(Debug)]
 struct Node {
     state: State,
     children: Vec<Option<NodeRef>>,
+    inf_action_mask: Tensor,
     parent: Option<WeakNodeRef>,
     parent_action: Option<usize>,
     reward: f64,
@@ -62,17 +82,24 @@ type WeakNodeRef = Weak<RefCell<Node>>;
 impl Node {
     fn new(
         state: State,
-        num_actions: usize,
+        action_mask: &Vec<bool>,
         parent: Option<WeakNodeRef>,
         parent_action: Option<usize>,
         reward: f64,
     ) -> Self {
+        let num_actions = action_mask.len();
         let mut children = Vec::with_capacity(num_actions);
         children.resize_with(num_actions, Default::default);
 
         Node {
             state,
             children,
+            inf_action_mask: Tensor::from_slice(
+                &action_mask
+                    .iter()
+                    .map(|&v| if v { 0.0 } else { f64::NEG_INFINITY })
+                    .collect::<Vec<_>>(),
+            ),
             parent,
             parent_action,
             reward,
@@ -81,50 +108,31 @@ impl Node {
         }
     }
 
-    fn new_root(initial_state: State, num_actions: usize) -> Self {
-        Self::new(initial_state, num_actions, None, None, 0.0)
-    }
-
-    fn num_actions(&self) -> usize {
-        self.children.len()
+    fn new_root(initial_state: State, action_mask: &Vec<bool>) -> Self {
+        Self::new(initial_state, action_mask, None, None, 0.0)
     }
 
     fn is_terminal(&self) -> bool {
         self.state.is_terminal()
     }
 
-    fn select_uct(&self, action_mask: Vec<bool>) -> usize {
+    fn select_uct(&self) -> usize {
         let mut rng = rand::thread_rng();
 
         let total_visits = self.visit_count.sum(kind::Kind::Int);
-        let action_mask = Tensor::from_slice(
-            action_mask
-                .iter()
-                .map(|&valid| if valid { 0.0 } else { f32::NEG_INFINITY })
-                .collect::<Vec<f32>>()
-                .as_slice(),
-        );
 
         let uct = &self.q_values
-            + &action_mask * (total_visits + 1e-3).sqrt() / (&self.visit_count + 1e-3);
+            + &self.inf_action_mask * (total_visits + 1e-3).sqrt() / (&self.visit_count + 1e-3);
         let max_indices = Tensor::where_(&uct.eq_tensor(&uct.max())).pop().unwrap();
 
         let idx = [rng.gen_range(0..max_indices.numel()) as i64];
         max_indices.int64_value(&idx) as usize
     }
 
-    fn select_q(&self, action_mask: Vec<bool>) -> usize {
+    fn select_q(&self) -> usize {
         let mut rng = rand::thread_rng();
 
-        let action_mask = Tensor::from_slice(
-            action_mask
-                .iter()
-                .map(|&valid| if valid { 0.0 } else { f32::NEG_INFINITY })
-                .collect::<Vec<f32>>()
-                .as_slice(),
-        );
-
-        let masked_q_values = &self.q_values + action_mask;
+        let masked_q_values = &self.q_values + &self.inf_action_mask;
         let max_indices = Tensor::where_(&masked_q_values.eq_tensor(&masked_q_values.max()))
             .pop()
             .unwrap();
@@ -151,7 +159,6 @@ struct Mcts {
     root: NodeRef,
     search_iters: u32,
     discount_factor: f64,
-    node_count: usize,
     edge_count: usize,
     num_actions: usize,
 }
@@ -162,22 +169,16 @@ impl Mcts {
         initial_state: State,
         search_iters: u32,
     ) -> Self {
-        let node_count = coupling_map
-            .keys()
-            .map(|k| if k.0 > k.1 { k.0 } else { k.1 })
-            .max()
-            .unwrap();
         let edge_count = coupling_map.len();
-        let num_actions = edge_count + 1;
+        let action_mask = initial_state.action_mask(&coupling_map);
 
         Mcts {
             coupling_map,
-            root: Rc::new(RefCell::new(Node::new_root(initial_state, num_actions))),
+            root: Rc::new(RefCell::new(Node::new_root(initial_state, &action_mask))),
             search_iters,
             discount_factor: 0.95,
-            node_count,
             edge_count,
-            num_actions,
+            num_actions: action_mask.len(),
         }
     }
 
@@ -192,10 +193,11 @@ impl Mcts {
         action: usize,
     ) -> NodeRef {
         let (next_state, reward) = self.step(&node.state, action);
+        let action_mask = self.action_mask(&next_state);
 
         let child_rc = Rc::new(RefCell::new(Node::new(
             next_state,
-            node.num_actions(),
+            &action_mask,
             Some(Rc::downgrade(&node_rc)),
             Some(action),
             reward,
@@ -206,19 +208,7 @@ impl Mcts {
     }
 
     fn action_mask(&self, state: &State) -> Vec<bool> {
-        let mut mask = vec![true; self.num_actions];
-
-        for (i, &edge) in self.coupling_map.keys().enumerate() {
-            if state.locked_nodes[edge.0] != 0 || state.locked_nodes[edge.1] != 0 {
-                mask[i] = false;
-            }
-        }
-
-        if state.locked_nodes.iter().all(|&n| n == 0) {
-            mask[self.commit_action()] = false;
-        }
-
-        mask
+        state.action_mask(&self.coupling_map)
     }
 
     fn step(&self, state: &State, action: usize) -> (State, f64) {
@@ -314,7 +304,7 @@ impl Mcts {
 
                 (node_rc, expanded) = {
                     let node = (*node_rc).borrow_mut();
-                    let action = node.select_uct(self.action_mask(&node.state));
+                    let action = node.select_uct();
 
                     match node.children[action] {
                         Some(ref child_rc) => (child_rc.clone(), false),
@@ -357,7 +347,7 @@ impl Mcts {
 
             self.root = {
                 let root = (*self.root).borrow_mut();
-                let action = root.select_q(self.action_mask(&root.state));
+                let action = root.select_q();
                 let child = &root.children[action];
 
                 commit_performed = action == commit_action;
@@ -383,7 +373,9 @@ impl Mcts {
 
 fn main() {
     let coupling_map = BTreeMap::from([((0, 1), 0.0), ((1, 2), 0.0), ((1, 3), 0.0), ((3, 4), 0.0)]);
-    let remaining_gates = vec![(0, 2), (2, 4), (1, 2), (1, 0), (1, 3), (4, 1)];
+    let remaining_gates = vec![
+        (0, 2), (2, 4), (1, 2), (1, 0), (1, 3), (4, 1),
+    ];
     let initial_mapping = vec![0, 1, 2, 3, 4];
 
     let initial_state = State::new(remaining_gates, initial_mapping);
