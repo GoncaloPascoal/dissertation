@@ -10,7 +10,7 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.providers.backend import Backend
 import skopt
 
-from hst import HilbertSchmidt, cost_hst
+from vqc.hst import HilbertSchmidt, cost_hst
 from vqc.optimization.discrete.simulated_annealing import SimulatedAnnealing
 from utils import ContinuousOptimizationResult
 

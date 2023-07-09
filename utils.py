@@ -1,10 +1,10 @@
 
 import collections
 from math import pi
-from typing import Callable, Dict, List, Sequence, Set, Tuple, Type, TypeVar
+from typing import Callable, Dict, List, Sequence, Set, Tuple, Type, TypeVar, Iterable
 
 from qiskit import QuantumCircuit
-from qiskit.circuit import Instruction
+from qiskit.circuit import Instruction, Qubit
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 
 
@@ -24,6 +24,13 @@ ContinuousOptimizationFunction = Callable[
     [QuantumCircuit, QuantumCircuit],
     ContinuousOptimizationResult,
 ]
+
+
+def qubits_to_indices(qc: QuantumCircuit, qubits: Iterable[Qubit]) -> Tuple[int, ...]:
+    return tuple(qc.find_bit(q).index for q in qubits)  # type: ignore
+
+def indices_to_qubits(qc: QuantumCircuit, indices: Iterable[int]) -> Tuple[Qubit, ...]:
+    return tuple(qc.qubits[i] for i in indices)
 
 
 def create_native_instruction_dict(native_instructions: Sequence[NativeInstruction]) -> NativeInstructionDict:

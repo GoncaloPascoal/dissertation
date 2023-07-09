@@ -9,7 +9,7 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.providers import Backend
 from qiskit_aer import AerSimulator
 
-from hst import HilbertSchmidt, LocalHilbertSchmidt, cost_hst_weighted
+from vqc.hst import HilbertSchmidt, LocalHilbertSchmidt, cost_hst_weighted
 from utils import ContinuousOptimizationResult
 
 
@@ -19,9 +19,9 @@ CostFunctionWithShots = Callable[[CostFunctionParameters, int], Tuple[float, flo
 
 def compute_gradient_with_variances(
     cost_function: CostFunctionWithShots,
-    params: NDArray[Literal['x'], Float],
-    shots_arr: NDArray[Literal['x'], Int],
-) -> Tuple[NDArray[Literal['x'], Float], NDArray[Literal['x'], Float]]:
+    params: NDArray[Literal['*'], Float],
+    shots_arr: NDArray[Literal['*'], Int],
+) -> Tuple[NDArray[Literal['*'], Float], NDArray[Literal['*'], Float]]:
     gradient = np.zeros(params.shape)
     variances = np.zeros(params.shape)
 
@@ -46,14 +46,14 @@ def compute_gradient_with_variances(
 
 def icans(
     cost_function: CostFunctionWithShots,
-    params: NDArray[Literal['x'], Float],
+    params: NDArray[Literal['*'], Float],
     min_shots: int,
     total_shots: int,
     lipschitz: float,
     learning_rate: float,
     running_average: float,
     gradient_norm_bias: float,
-) -> NDArray[Literal['x'], Float]:
+) -> NDArray[Literal['*'], Float]:
     """
     Implementation of the individual Coupled Adaptive Number of Shots (iCANS) method for
     stochastic gradient descent.
@@ -103,13 +103,13 @@ def icans(
 
 def gcans(
     cost_function: CostFunctionWithShots,
-    params: NDArray[Literal['x'], Float],
+    params: NDArray[Literal['*'], Float],
     min_shots: int,
     total_shots: int,
     lipschitz: float,
     learning_rate: float,
     running_average: float,
-) -> NDArray[Literal['x'], Float]:
+) -> NDArray[Literal['*'], Float]:
     """
     Implementation of the global Coupled Adaptive Number of Shots (gCANS) method for
     stochastic gradient descent.

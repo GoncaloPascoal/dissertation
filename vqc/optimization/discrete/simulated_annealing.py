@@ -17,7 +17,7 @@ from qiskit.dagcircuit import DAGOpNode
 from rich.logging import RichHandler
 from tqdm.rich import tqdm_rich
 
-from parameter_generator import ParameterGenerator
+from vqc.parameter_generator import ParameterGenerator
 from utils import ContinuousOptimizationFunction, ContinuousOptimizationResult
 
 from rich import print
