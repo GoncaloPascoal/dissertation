@@ -66,6 +66,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     :param allow_bridge_gate: Allow the use of BRIDGE gates when routing.
     :param error_rates: Array of two-qubit gate error rates. If ``None``, routing will be noise-unaware.
     :param obs_modules: Observation modules that define the key-value pairs in observations.
+    :param rllib: Whether or not RLlib is being used for deep reinforcement learning.
 
     :ivar node_to_qubit: Current mapping from physical nodes to logical qubits.
     :ivar qubit_to_node: Current mapping from logical qubits to physical nodes.
@@ -93,6 +94,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         allow_bridge_gate: bool = True,
         error_rates: Optional[NDArray] = None,
         obs_modules: Optional[List['ObsModule']] = None,
+        rllib: bool = False,
     ):
         if initial_mapping.shape != (coupling_map.num_nodes(),):
             raise ValueError('Initial mapping has invalid shape for the provided coupling map')
@@ -106,6 +108,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.allow_bridge_gate = allow_bridge_gate
         self.error_rates = error_rates
         self.obs_modules = [] if obs_modules is None else obs_modules
+        self.rllib = rllib
 
         # Computations using coupling map
         self.num_qubits = coupling_map.num_nodes()
@@ -204,7 +207,15 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         return env
 
     def current_obs(self) -> RoutingObsType:
-        return {module.key(): module.obs(self) for module in self.obs_modules}
+        obs = {module.key(): module.obs(self) for module in self.obs_modules}
+
+        if self.rllib:
+            obs = {
+                'action_mask': self.action_masks(),
+                'true_obs': obs,
+            }
+
+        return obs
 
     def routed_circuit(self) -> QuantumCircuit:
         routed_dag = self.dag.copy_empty_like()
@@ -224,7 +235,15 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         raise NotImplementedError
 
     def _obs_spaces(self) -> Dict[str, spaces.Space]:
-        return {module.key(): module.space(self) for module in self.obs_modules}
+        obs_spaces = {module.key(): module.space(self) for module in self.obs_modules}
+
+        if self.rllib:
+            obs_spaces = {
+                'action_mask': spaces.Box(0, 1, shape=(self.action_space.n,), dtype=np.int8),
+                'true_obs': spaces.Dict(obs_spaces),
+            }
+
+        return obs_spaces
 
     def _schedule_gates(self, gates: GateSchedulingList):
         for op_node, nodes in gates:
@@ -332,18 +351,19 @@ class SequentialRoutingEnv(RoutingEnv):
         allow_bridge_gate: bool = True,
         error_rates: Optional[NDArray] = None,
         obs_modules: Optional[List['ObsModule']] = None,
+        rllib: bool = False,
         restrict_swaps_to_front_layer: bool = True,
     ):
-        super().__init__(circuit, coupling_map, initial_mapping, allow_bridge_gate, error_rates, obs_modules)
+        super().__init__(circuit, coupling_map, initial_mapping, allow_bridge_gate, error_rates, obs_modules, rllib)
 
         self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
 
         self._blocked_swap = None
 
-        self.observation_space = spaces.Dict(self._obs_spaces())
-
         num_actions = self.num_edges + len(self.bridge_pairs)
         self.action_space = spaces.Discrete(num_actions)
+
+        self.observation_space = spaces.Dict(self._obs_spaces())
 
     def step(self, action: int) -> Tuple[RoutingObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
         if self.terminated:
@@ -433,10 +453,11 @@ class QcpRoutingEnv(SequentialRoutingEnv):
         depth: int,
         allow_bridge_gate: bool = True,
         error_rates: Optional[NDArray] = None,
+        rllib: bool = False,
         restrict_swaps_to_front_layer: bool = True,
     ):
         super().__init__(circuit, coupling_map, initial_mapping, allow_bridge_gate, error_rates,
-                         [CircuitMatrix(depth)], restrict_swaps_to_front_layer)
+                         [CircuitMatrix(depth)], rllib, restrict_swaps_to_front_layer)
 
 
 class SchedulingMap(MutableMapping[int, int]):
@@ -487,18 +508,19 @@ class LayeredRoutingEnv(RoutingEnv):
         allow_bridge_gate: bool = True,
         error_rates: Optional[NDArray] = None,
         obs_modules: Optional[List['ObsModule']] = None,
+        rllib: bool = False,
         use_decomposed_actions: bool = False,
     ):
-        super().__init__(circuit, coupling_map, initial_mapping, allow_bridge_gate, error_rates, obs_modules)
+        super().__init__(circuit, coupling_map, initial_mapping, allow_bridge_gate, error_rates, obs_modules, rllib)
 
         self.use_decomposed_actions = use_decomposed_actions
         self.scheduling_map = SchedulingMap()
 
-        self.observation_space = spaces.Dict(self._obs_spaces())
-
         # Account for COMMIT / FINISH action in addition to SWAP and BRIDGE gates
         num_actions = self.num_edges + len(self.bridge_pairs) + 1
         self.action_space = spaces.Discrete(num_actions)
+
+        self.observation_space = spaces.Dict(self._obs_spaces())
 
     def step(self, action: int) -> Tuple[RoutingObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
         if action < self.num_edges:
