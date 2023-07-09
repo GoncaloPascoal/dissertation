@@ -69,7 +69,7 @@ def main():
                         help='routing method for Qiskit compiler', default='sabre')
     parser.add_argument('-d', '--depth', metavar='D', help='depth of circuit observations', default=8, type=int)
     parser.add_argument('--learning-iters', metavar='I', help='learning iterations', default=50, type=int)
-    parser.add_argument('--training-iters', metavar='I', help='training episodes per circuit', default=4, type=int)
+    parser.add_argument('--training-iters', metavar='I', help='training episodes per circuit', default=1, type=int)
     parser.add_argument('--evaluation-iters', metavar='I', help='evaluation episodes per circuit', default=20,
                         type=int)
     parser.add_argument('--evaluation-circuits', metavar='C', help='number of evaluation circuits', default=100,

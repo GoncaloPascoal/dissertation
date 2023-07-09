@@ -66,7 +66,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     :param allow_bridge_gate: Allow the use of BRIDGE gates when routing.
     :param error_rates: Array of two-qubit gate error rates. If ``None``, routing will be noise-unaware.
     :param obs_modules: Observation modules that define the key-value pairs in observations.
-    :param rllib: Whether or not RLlib is being used for deep reinforcement learning.
+    :param rllib: ray-rllib is being used for deep reinforcement learning.
 
     :ivar node_to_qubit: Current mapping from physical nodes to logical qubits.
     :ivar qubit_to_node: Current mapping from logical qubits to physical nodes.
@@ -846,7 +846,7 @@ class CircuitMatrix(ObsModule[SequentialRoutingEnv]):
         return mapped_circuit
 
 
-class QubitInteractions(ObsModule[LayeredRoutingEnv]):
+class QubitInteractions(ObsModule[RoutingEnv]):
     def __init__(self, max_depth: int = 8):
         self.max_depth = max_depth
 
