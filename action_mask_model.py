@@ -1,16 +1,18 @@
 
 from typing import Any
 
-from gymnasium import spaces
 import torch
+from gymnasium import spaces
+from ray.rllib.models.preprocessors import DictFlatteningPreprocessor
 from ray.rllib.models.torch.fcnet import FullyConnectedNetwork
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.utils.torch_utils import FLOAT_MIN
 from ray.rllib.utils.typing import ModelConfigDict
 from torch import TensorType
+from torch import nn
 
 
-class TorchActionMaskModel(TorchModelV2):
+class ActionMaskModel(TorchModelV2, nn.Module):
     def __init__(
         self,
         obs_space: spaces.Space,
@@ -19,17 +21,25 @@ class TorchActionMaskModel(TorchModelV2):
         model_config: ModelConfigDict,
         name: str,
     ):
-        if not (
-            isinstance(obs_space, spaces.Dict)
-            and 'action_mask' in obs_space.spaces
-            and 'true_obs' in obs_space.spaces
-        ):
-            raise ValueError('Invalid observation space')
+        if hasattr(obs_space, 'original_space'):
+            original_space = obs_space.original_space
+        else:
+            raise ValueError(f'Could not obtain original observation space')
 
-        super().__init__(obs_space, action_space, num_outputs, model_config, name)
+        if not (
+            isinstance(original_space, spaces.Dict)
+            and 'action_mask' in original_space.spaces
+            and 'true_obs' in original_space.spaces
+        ):
+            raise ValueError(f'Invalid observation space: {original_space}')
+
+        TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
+        nn.Module.__init__(self)
+
+        preprocessor = DictFlatteningPreprocessor(original_space['true_obs'])
 
         self.internal_model = FullyConnectedNetwork(
-            obs_space['true_obs'],
+            preprocessor.observation_space,
             action_space,
             num_outputs,
             model_config,
@@ -44,8 +54,11 @@ class TorchActionMaskModel(TorchModelV2):
     ) -> (TensorType, list[TensorType]):
         action_mask = input_dict['obs']['action_mask']
 
+        obs_tensors = [torch.flatten(t, start_dim=1) for t in input_dict['obs']['true_obs'].values()]
+        true_obs_flat = torch.cat(obs_tensors, dim=1)
+
         # Compute the unmasked logits
-        logits, _ = self.internal_model({'obs': input_dict['obs']['true_obs']})
+        logits, _ = self.internal_model({'obs': true_obs_flat})
 
         # Convert action_mask into a [0.0 || -inf]-type mask
         inf_mask = torch.clamp(torch.log(action_mask), min=FLOAT_MIN)
