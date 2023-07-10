@@ -17,7 +17,7 @@ from stable_baselines3.common.vec_env import VecMonitor, DummyVecEnv
 from tqdm.rich import tqdm
 
 from routing.circuit_gen import RandomCircuitGenerator
-from routing.env import QcpRoutingEnv, NoiseConfig, TrainingWrapper, EvaluationWrapper
+from routing.env import QcpRoutingEnv, NoiseGenerationConfig, TrainingWrapper, EvaluationWrapper
 from utils import qubits_to_indices
 
 
@@ -86,7 +86,7 @@ def main():
 
     # Parameters
     n_steps = 2048
-    noise_config = NoiseConfig(1e-2, 3e-3)
+    noise_generation_config = NoiseGenerationConfig(1e-2, 3e-3)
 
     g = t_topology()
     circuit_generator = RandomCircuitGenerator(g.num_nodes(), args.circuit_size, seed=args.seed)
@@ -96,8 +96,8 @@ def main():
         plt.show()
 
     def env_fn() -> TrainingWrapper:
-        return TrainingWrapper(circuit_generator, g, QcpRoutingEnv, args.depth, noise_config=noise_config,
-                               training_iters=args.training_iters)
+        return TrainingWrapper(circuit_generator, g, QcpRoutingEnv, args.depth,
+                               noise_generation_config=noise_generation_config, training_iters=args.training_iters)
 
     try:
         model = MaskablePPO.load(args.model_path, tensorboard_log='logs/routing', stats_window_size=300)
@@ -130,7 +130,8 @@ def main():
         model.save(args.model_path)
         return
 
-    eval_env = EvaluationWrapper(circuit_generator, g, QcpRoutingEnv, args.depth, noise_config=noise_config,
+    eval_env = EvaluationWrapper(circuit_generator, g, QcpRoutingEnv, args.depth,
+                                 noise_generation_config=noise_generation_config,
                                  evaluation_iters=args.evaluation_iters)
     env = eval_env.env
     initial_layout = env.qubit_to_node.copy().tolist()
