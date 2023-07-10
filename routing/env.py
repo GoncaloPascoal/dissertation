@@ -26,6 +26,15 @@ from utils import qubits_to_indices, indices_to_qubits
 
 @dataclass
 class NoiseConfig:
+    """
+    Configuration values for controlling rewards in noise-aware routing environments.
+
+    :ivar log_base: Base used to calculate log reliabilities from gate error rates.
+    :ivar min_log_reliability: Greatest penalty that can be issued from scheduling a gate, to prevent infinite rewards.
+                               Cannot be positive.
+    :ivar added_gate_reward: Flat value that will be added to the reward associated with each two-qubit gate from the
+                             original circuit. Cannot be negative.
+    """
     log_base: float = field(default=e, kw_only=True)
     min_log_reliability: float = field(default=-100.0, kw_only=True)
     added_gate_reward: float = field(default=0.02, kw_only=True)
@@ -51,6 +60,14 @@ class NoiseConfig:
 
 @dataclass
 class NoiseGenerationConfig:
+    """
+    Allows configuration of randomly generated gate error rates. Intended to be used when training noise-aware
+    reinforcement learning models.
+
+    :ivar mean: Mean gate error rate.
+    :ivar std: Standard deviation of gate error rates.
+    :ivar recalibration_interval: Error rates will be regenerated after routing this many circuits.
+    """
     mean: float
     std: float
     recalibration_interval: int = field(default=16, kw_only=True)
@@ -74,6 +91,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
                             will be used for each training iteration.
     :param allow_bridge_gate: Allow the use of BRIDGE gates when routing.
     :param error_rates: Array of two-qubit gate error rates. If ``None``, routing will be noise-unaware.
+    :param noise_config: Allows configuration of rewards in noise-aware environments.
     :param obs_modules: Observation modules that define the key-value pairs in observations.
     :param rllib: ray-rllib is being used for deep reinforcement learning.
 
@@ -81,7 +99,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     :ivar qubit_to_node: Current mapping from logical qubits to physical nodes.
     :ivar routed_gates: List of already routed gates, including additional SWAP and BRIDGE operations.
     :ivar log_reliabilities: Array of logarithms of two-qubit gate reliabilities (``reliability = 1 - error_rate``)
-    :ivar log_reliabilities_map: Dictionary that maps edges to their corresponding log reliability values.
+    :ivar edge_to_log_reliability: Dictionary that maps edges to their corresponding log reliability values.
     """
 
     observation_space: spaces.Dict
@@ -93,7 +111,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
     routed_gates: List[Tuple[Operation, Tuple[Qubit, ...]]]
     log_reliabilities: NDArray
-    log_reliabilities_map: Dict[Tuple[int, int], float]
+    edge_to_log_reliability: Dict[Tuple[int, int], float]
 
     def __init__(
         self,
@@ -198,7 +216,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
             m[edge] = value
             m[edge[::-1]] = value
 
-        self.log_reliabilities_map = m
+        self.edge_to_log_reliability = m
 
     def copy(self) -> Self:
         """
@@ -315,22 +333,22 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
     def _gate_reward(self, edge: Tuple[int, int]) -> float:
         if self.noise_aware:
-            return self.log_reliabilities_map[edge] + self.noise_config.added_gate_reward
+            return self.edge_to_log_reliability[edge] + self.noise_config.added_gate_reward
 
         return 1.0
 
     def _swap_reward(self, edge: Tuple[int, int]) -> float:
         if self.noise_aware:
-            return 3.0 * self.log_reliabilities_map[edge]
+            return 3.0 * self.edge_to_log_reliability[edge]
 
         return -3.0
 
     def _bridge_reward(self, control: int, middle: int, target: int) -> float:
         if self.noise_aware:
             return 2.0 * (
-                self.log_reliabilities_map[(middle, target)] +
-                self.log_reliabilities_map[(control, middle)]
-            ) - np.emath.logn(e, 0.98)
+                self.edge_to_log_reliability[(middle, target)] +
+                self.edge_to_log_reliability[(control, middle)]
+            ) + self.noise_config.added_gate_reward
 
         return -2.0
 
