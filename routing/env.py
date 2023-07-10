@@ -211,12 +211,10 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.error_rates = error_rates.copy()
         self.log_reliabilities = self.noise_config.calculate_log_reliabilities(error_rates)
 
-        m = {}
-        for edge, value in zip(self.edge_list, self.log_reliabilities):  # type: ignore
-            m[edge] = value
-            m[edge[::-1]] = value
-
-        self.edge_to_log_reliability = m
+        self.edge_to_log_reliability = {}
+        for edge, value in zip(self.edge_list, self.log_reliabilities):
+            self.edge_to_log_reliability[edge] = value
+            self.edge_to_log_reliability[edge[::-1]] = value
 
     def copy(self) -> Self:
         """
@@ -689,7 +687,7 @@ class LayeredRoutingEnv(RoutingEnv):
     #     return distances
 
 
-RoutingEnvType = TypeVar('RoutingEnvType', bound=RoutingEnv)
+_RoutingEnvType = TypeVar('_RoutingEnvType', bound=RoutingEnv)
 
 
 def _generate_random_mapping(num_qubits: int) -> NDArray:
@@ -718,7 +716,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         self,
         circuit_generator: CircuitGenerator,
         coupling_map: rx.PyGraph,
-        env_class: Type[RoutingEnvType],
+        env_class: Type[_RoutingEnvType],
         *args,
         noise_generation_config: Optional[NoiseGenerationConfig] = None,
         training_iters: int = 1,
@@ -783,7 +781,7 @@ class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         self,
         circuit_generator: CircuitGenerator,
         coupling_map: rx.PyGraph,
-        env_class: Type[RoutingEnvType],
+        env_class: Type[_RoutingEnvType],
         *args,
         noise_generation_config: Optional[NoiseGenerationConfig] = None,
         evaluation_iters: int = 25,
@@ -818,18 +816,18 @@ class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         return super().reset(seed=seed, options=options)
 
 
-class ObsModule(ABC, Generic[RoutingEnvType]):
+class ObsModule(ABC, Generic[_RoutingEnvType]):
     @staticmethod
     @abstractmethod
     def key() -> str:
         raise NotImplementedError
 
     @abstractmethod
-    def space(self, env: RoutingEnvType) -> spaces.Box:
+    def space(self, env: _RoutingEnvType) -> spaces.Box:
         raise NotImplementedError
 
     @abstractmethod
-    def obs(self, env: RoutingEnvType) -> NDArray:
+    def obs(self, env: _RoutingEnvType) -> NDArray:
         raise NotImplementedError
 
 

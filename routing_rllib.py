@@ -1,3 +1,4 @@
+
 from typing import Any
 
 import gymnasium as gym
@@ -6,7 +7,7 @@ from ray.tune import register_env
 
 from action_mask_model import ActionMaskModel
 from routing.circuit_gen import RandomCircuitGenerator
-from routing.env import TrainingWrapper, QcpRoutingEnv, NoiseConfig
+from routing.env import TrainingWrapper, QcpRoutingEnv, NoiseGenerationConfig
 from routing_sb3 import t_topology
 
 
@@ -16,7 +17,7 @@ def env_creator(env_config: dict[str, Any]) -> gym.Env:
         env_config['coupling_map'],
         QcpRoutingEnv,
         8,
-        noise_config=env_config.get('noise_config'),
+        noise_generation_config=env_config.get('noise_generation_config'),
         rllib=True,
     )
 
@@ -26,19 +27,18 @@ def main():
 
     g = t_topology()
     circuit_generator = RandomCircuitGenerator(g.num_nodes(), 64)
-    noise_config = NoiseConfig(1e-2, 3e-3)
+    noise_generation_config = NoiseGenerationConfig(1e-2, 3e-3)
 
     config = (
         PPOConfig().training(
-            train_batch_size=8192,
-            sgd_minibatch_size=64,
-            num_sgd_iter=10,
+            train_batch_size=4096,
             model={
                 'custom_model': ActionMaskModel,
                 'fcnet_hiddens': [64, 64, 96],
                 'fcnet_activation': 'silu',
             },
         )
+        .resources(num_gpus=0)
         .rollouts(
             batch_mode='complete_episodes',
             num_rollout_workers=4,
@@ -54,7 +54,7 @@ def main():
             env_config={
                 'circuit_generator': circuit_generator,
                 'coupling_map': g,
-                'noise_config': noise_config,
+                'noise_generation_config': noise_generation_config,
             }
         )
     )

@@ -67,13 +67,21 @@ class LayeredRandomCircuitGenerator(CircuitGenerator):
 
 
 class DatasetCircuitGenerator(CircuitGenerator):
-    def __init__(self, dataset: List[QuantumCircuit], *, seed: Optional[int] = None):
+    def __init__(self, dataset: List[QuantumCircuit], random: bool = True, *, seed: Optional[int] = None):
         super().__init__(seed=seed)
 
         if not dataset:
             raise ValueError('Dataset cannot be empty')
 
         self.dataset = dataset
+        self.random = random
+        self.idx = 0
 
     def generate(self) -> QuantumCircuit:
-        return self.rng.choice(self.dataset)
+        if self.random:
+            qc = self.rng.choice(self.dataset)
+        else:
+            qc = self.dataset[self.idx]
+            self.idx = (self.idx + 1) % len(self.dataset)
+
+        return qc
