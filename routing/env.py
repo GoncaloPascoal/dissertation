@@ -793,6 +793,7 @@ class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
 
         if noise_generation_config is not None:
             env.calibrate(noise_generation_config.generate_error_rates(env.num_edges))
+        env.initial_mapping = _generate_random_mapping(env.num_qubits)
 
         super().__init__(env)
 

@@ -1,5 +1,7 @@
 
 import collections
+import functools
+import operator
 from math import pi
 from typing import Callable, Dict, List, Sequence, Set, Tuple, Type, TypeVar, Iterable
 
@@ -31,6 +33,13 @@ def qubits_to_indices(qc: QuantumCircuit, qubits: Iterable[Qubit]) -> Tuple[int,
 
 def indices_to_qubits(qc: QuantumCircuit, indices: Iterable[int]) -> Tuple[Qubit, ...]:
     return tuple(qc.qubits[i] for i in indices)
+
+
+def reliability(circuit: QuantumCircuit, reliability_map: dict[tuple[int, ...], float]) -> float:
+    return functools.reduce(operator.mul, [
+        reliability_map[qubits_to_indices(circuit, instruction.qubits)]
+        for instruction in circuit.get_instructions('cx')
+    ])
 
 
 def create_native_instruction_dict(native_instructions: Sequence[NativeInstruction]) -> NativeInstructionDict:

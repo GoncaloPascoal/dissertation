@@ -2,23 +2,20 @@
 from typing import Any
 
 import gymnasium as gym
-from ray.rllib.algorithms.ppo import PPOConfig
+from ray.rllib.algorithms.dqn import DQNConfig
 from ray.tune import register_env
 
 from action_mask_model import ActionMaskModel
 from routing.circuit_gen import RandomCircuitGenerator
-from routing.env import TrainingWrapper, QcpRoutingEnv, NoiseGenerationConfig
+from routing.env import TrainingWrapper, QcpRoutingEnv, NoiseGenerationConfig, NoiseConfig
 from routing_sb3 import t_topology
 
 
 def env_creator(env_config: dict[str, Any]) -> gym.Env:
     return TrainingWrapper(
+        QcpRoutingEnv(env_config['coupling_map'], 8, noise_config=NoiseConfig(), rllib=True),
         env_config['circuit_generator'],
-        env_config['coupling_map'],
-        QcpRoutingEnv,
-        8,
         noise_generation_config=env_config.get('noise_generation_config'),
-        rllib=True,
     )
 
 
@@ -30,18 +27,23 @@ def main():
     noise_generation_config = NoiseGenerationConfig(1e-2, 3e-3)
 
     config = (
-        PPOConfig().training(
-            train_batch_size=4096,
+        DQNConfig().training(
+            train_batch_size=128,
             model={
                 'custom_model': ActionMaskModel,
                 'fcnet_hiddens': [64, 64, 96],
                 'fcnet_activation': 'silu',
             },
+            dueling=False,
+            hiddens=[],
         )
         .resources(num_gpus=0)
+        .reporting(
+            min_train_timesteps_per_iteration=2000,
+        )
         .rollouts(
             batch_mode='complete_episodes',
-            num_rollout_workers=4,
+            num_rollout_workers=3,
             num_envs_per_worker=4,
         )
         .fault_tolerance(
@@ -61,7 +63,7 @@ def main():
 
     algorithm = config.build()
 
-    for _ in range(128):
+    for _ in range(500):
         algorithm.train()
 
     algorithm.save('models/rllib')

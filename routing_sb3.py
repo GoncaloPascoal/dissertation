@@ -1,13 +1,11 @@
 
-import functools
-import operator
 from argparse import ArgumentParser
 from math import inf
 
 import matplotlib.pyplot as plt
 import rustworkx as rx
 import torch.nn as nn
-from qiskit import QuantumCircuit, transpile
+from qiskit import transpile
 from qiskit.transpiler import CouplingMap
 from rich import print
 from rustworkx.visualization import mpl_draw
@@ -18,7 +16,7 @@ from tqdm.rich import tqdm
 
 from routing.circuit_gen import RandomCircuitGenerator
 from routing.env import QcpRoutingEnv, NoiseGenerationConfig, TrainingWrapper, EvaluationWrapper, NoiseConfig
-from utils import qubits_to_indices
+from utils import reliability
 
 
 def t_topology() -> rx.PyGraph:
@@ -125,7 +123,7 @@ def main():
     model.set_random_seed(args.seed)
 
     if args.learn:
-        model.learn(args.envs * args.learning_iters * n_steps, progress_bar=True, tb_log_name='ppo',
+        model.learn(args.envs * args.learning_iters * model.n_steps, progress_bar=True, tb_log_name='ppo',
                     reset_num_timesteps=reset)
         model.save(args.model_path)
         return
@@ -141,12 +139,6 @@ def main():
         value = 1.0 - value
         reliability_map[edge] = value
         reliability_map[edge[::-1]] = value
-
-    def reliability(circuit: QuantumCircuit) -> float:
-        return functools.reduce(operator.mul, [
-            reliability_map[qubits_to_indices(circuit, instruction.qubits)]
-            for instruction in circuit.get_instructions('cx')
-        ])
 
     coupling_map = CouplingMap(g.to_directed().edge_list())
 
@@ -200,8 +192,8 @@ def main():
         avg_depth_rl += routed_circuit.depth()
         avg_depth_qiskit += t_qc.depth()
 
-        avg_reliability_rl += reliability(routed_circuit)
-        avg_reliability_qiskit += reliability(t_qc)
+        avg_reliability_rl += reliability(routed_circuit, reliability_map)
+        avg_reliability_qiskit += reliability(t_qc, reliability_map)
 
     # Calculate averages
     avg_episode_reward /= args.evaluation_circuits
