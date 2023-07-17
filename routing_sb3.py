@@ -17,25 +17,19 @@ from stable_baselines3.common.vec_env import VecMonitor, DummyVecEnv
 from tqdm.rich import tqdm
 
 from routing.circuit_gen import RandomCircuitGenerator
-from routing.env import QcpRoutingEnv, NoiseGenerationConfig, TrainingWrapper, EvaluationWrapper
+from routing.env import QcpRoutingEnv, NoiseGenerationConfig, TrainingWrapper, EvaluationWrapper, NoiseConfig
 from utils import qubits_to_indices
 
 
 def t_topology() -> rx.PyGraph:
     g = rx.PyGraph()
-
-    g.add_nodes_from(range(5))
-    g.add_edges_from_no_data([(0, 1), (1, 2), (1, 3), (3, 4)])
-
+    g.extend_from_edge_list([(0, 1), (1, 2), (1, 3), (3, 4)])
     return g
 
 
 def h_topology() -> rx.PyGraph:
     g = rx.PyGraph()
-
-    g.add_nodes_from(range(7))
-    g.add_edges_from_no_data([(0, 1), (1, 2), (1, 3), (3, 5), (4, 5), (5, 6)])
-
+    g.extend_from_edge_list([(0, 1), (1, 2), (1, 3), (3, 5), (4, 5), (5, 6)])
     return g
 
 
@@ -52,6 +46,12 @@ def grid_topology(rows: int, cols: int) -> rx.PyGraph:
             if row != rows - 1:
                 g.add_edge(row * cols + col, (row + 1) * cols + col, None)
 
+    return g
+
+
+def linear_topology(num_qubits: int) -> rx.PyGraph:
+    g = rx.PyGraph()
+    g.extend_from_edge_list([(i, i + 1) for i in range(num_qubits - 1)])
     return g
 
 
@@ -96,12 +96,12 @@ def main():
         plt.show()
 
     def env_fn() -> TrainingWrapper:
-        return TrainingWrapper(circuit_generator, g, QcpRoutingEnv, args.depth,
+        return TrainingWrapper(QcpRoutingEnv(g, args.depth, noise_config=NoiseConfig()), circuit_generator,
                                noise_generation_config=noise_generation_config, training_iters=args.training_iters)
 
     try:
         model = MaskablePPO.load(args.model_path, tensorboard_log='logs/routing', stats_window_size=300)
-        args.depth = model.observation_space['circuit'].shape[1]
+        args.depth = model.observation_space['circuit_matrix'].shape[1]
 
         # Only need to create vectorized environment when learning
         if args.learn:
@@ -130,7 +130,7 @@ def main():
         model.save(args.model_path)
         return
 
-    eval_env = EvaluationWrapper(circuit_generator, g, QcpRoutingEnv, args.depth,
+    eval_env = EvaluationWrapper(QcpRoutingEnv(g, args.depth, noise_config=NoiseConfig()), circuit_generator,
                                  noise_generation_config=noise_generation_config,
                                  evaluation_iters=args.evaluation_iters)
     env = eval_env.env

@@ -722,6 +722,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
     """
 
     env: RoutingEnv
+    noise_generation_config: Optional[NoiseGenerationConfig]
 
     def __init__(
         self,
@@ -784,9 +785,14 @@ class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         noise_generation_config: Optional[NoiseGenerationConfig] = None,
         evaluation_iters: int = 20,
     ):
+        if (noise_generation_config is not None) != env.noise_aware:
+            raise ValueError('Noise-awareness mismatch between wrapper and env')
+
         self.circuit_generator = circuit_generator
-        self.noise_generation_config = noise_generation_config
         self.evaluation_iters = evaluation_iters
+
+        if noise_generation_config is not None:
+            env.calibrate(noise_generation_config.generate_error_rates(env.num_edges))
 
         super().__init__(env)
 
