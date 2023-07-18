@@ -190,15 +190,15 @@ def main():
 
     from routing.env import QcpRoutingEnv
     from routing.circuit_gen import RandomCircuitGenerator
-    from routing.env import NoiseConfig
+    from routing.env import NoiseGenerationConfig
 
     g = rx.PyGraph()
     g.add_nodes_from([0, 1, 2, 3, 4])
     g.add_edges_from_no_data([(0, 1), (1, 2), (1, 3), (3, 4)])
-    noise_config = NoiseConfig(1e-2, 3e-3, log_base=2)
+    noise_generation_config = NoiseGenerationConfig(1e-2, 3e-3, log_base=2)
 
     env = QcpRoutingEnv(g, RandomCircuitGenerator(g.num_nodes(), 16), 8,
-                        training_iterations=4, noise_config=noise_config, termination_reward=0.0)
+                        training_iterations=4, noise_config=noise_generation_config, termination_reward=0.0)
     model = MaskablePPO.load('models/m_qcp_routing.model', env, tensorboard_log='logs/routing')
 
     ga = initial_mapping_and_routing(model, env)

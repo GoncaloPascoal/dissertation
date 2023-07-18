@@ -1,5 +1,5 @@
 
-from typing import List, Optional
+from typing import List
 
 from qiskit.circuit import Gate
 from qiskit.dagcircuit import DAGCircuit, DAGOpNode
@@ -22,16 +22,3 @@ def dag_layers(dag: DAGCircuit) -> List[List[DAGOpNode]]:
         layers.append(layer)
 
     return layers
-
-
-def op_node_at(dag: DAGCircuit, layer: int, qubit: int) -> Optional[DAGOpNode]:
-    target_node = None
-    layers = dag_layers(dag)
-
-    if layer < len(layers):
-        for op_node in layers[layer]:
-            if qubit in {dag.qubits.index(q) for q in op_node.qargs}:
-                target_node = op_node
-                break
-
-    return target_node
