@@ -6,18 +6,20 @@ from collections import OrderedDict
 from collections.abc import MutableMapping, Iterable
 from dataclasses import dataclass, field
 from math import e
-from typing import Optional, Tuple, Dict, Any, List, SupportsFloat, Iterator, Self, TypeVar, Generic, Type, TypeAlias
+from typing import Optional, Any, SupportsFloat, Iterator, Self, TypeVar, Generic, TypeAlias
 
 import gymnasium as gym
 import numpy as np
 import rustworkx as rx
 from gymnasium import spaces
 from nptyping import NDArray
+from ordered_set import OrderedSet
 from qiskit import QuantumCircuit
 from qiskit.circuit import Qubit, Operation
 from qiskit.circuit.library import SwapGate, CXGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGOpNode
+from qiskit.transpiler.passes import CommutationAnalysis
 
 from dag_utils import dag_layers
 from routing.circuit_gen import CircuitGenerator
@@ -76,9 +78,9 @@ class NoiseGenerationConfig:
         return np.random.normal(self.mean, self.std, n).clip(0.0, 1.0)
 
 
-RoutingObsType: TypeAlias = Dict[str, NDArray]
-GateSchedulingList: TypeAlias = List[Tuple[DAGOpNode, Tuple[int, ...]]]
-BridgeArgs: TypeAlias = Tuple[DAGOpNode, Tuple[int, int, int]]
+RoutingObsType: TypeAlias = dict[str, NDArray]
+GateSchedulingList: TypeAlias = list[tuple[DAGOpNode, tuple[int, ...]]]
+BridgeArgs: TypeAlias = tuple[DAGOpNode, tuple[int, int, int]]
 
 
 class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
@@ -91,6 +93,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     :param initial_mapping: Initial mapping from physical nodes to logical qubits. If ``None``, a random initial mapping
                             will be used for each training iteration.
     :param allow_bridge_gate: Allow the use of BRIDGE gates when routing.
+    :param commutation_analysis: Use commutation rules to schedule additional gates at each time step.
     :param error_rates: Array of two-qubit gate error rates.
     :param noise_config: Allows configuration of rewards in noise-aware environments. If ``None``, routing will be
                          noise-unaware.
@@ -109,11 +112,11 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
     initial_mapping: NDArray
     error_rates: Optional[NDArray]
-    obs_modules: List['ObsModule']
+    obs_modules: list['ObsModule']
 
-    routed_gates: List[Tuple[Operation, Tuple[Qubit, ...]]]
+    routed_gates: list[tuple[Operation, tuple[Qubit, ...]]]
     log_reliabilities: NDArray
-    edge_to_log_reliability: Dict[Tuple[int, int], float]
+    edge_to_log_reliability: dict[tuple[int, int], float]
 
     def __init__(
         self,
@@ -121,9 +124,10 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         circuit: Optional[QuantumCircuit] = None,
         initial_mapping: Optional[NDArray] = None,
         allow_bridge_gate: bool = True,
+        commutation_analysis: bool = True,
         error_rates: Optional[NDArray] = None,
         noise_config: Optional[NoiseConfig] = None,
-        obs_modules: Optional[List['ObsModule']] = None,
+        obs_modules: Optional[list['ObsModule']] = None,
         rllib: bool = False,
     ):
         num_qubits = coupling_map.num_nodes()
@@ -145,6 +149,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.circuit = circuit
         self.initial_mapping = initial_mapping
         self.allow_bridge_gate = allow_bridge_gate
+        self.commutation_analysis = commutation_analysis
         self.error_rates = error_rates
         self.noise_config = noise_config
         self.obs_modules = [] if obs_modules is None else obs_modules
@@ -164,6 +169,8 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
             )
         else:
             self.bridge_pairs = []
+
+        self.commutation_pass = CommutationAnalysis()
 
         # State information
         self.node_to_qubit = initial_mapping.copy()
@@ -203,10 +210,13 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self,
         *,
         seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[RoutingObsType, Dict[str, Any]]:
+        options: Optional[dict[str, Any]] = None,
+    ) -> tuple[RoutingObsType, dict[str, Any]]:
         self.dag = circuit_to_dag(self.circuit)
         self.routed_gates = []
+
+        if self.commutation_analysis:
+            self.commutation_pass.run(self.dag)
 
         self._reset_state()
 
@@ -220,12 +230,13 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         :param error_rates: Array of two-qubit gate error rates.
         """
         self.error_rates = error_rates.copy()
-        self.log_reliabilities = self.noise_config.calculate_log_reliabilities(error_rates)
+        if self.noise_config is not None:
+            self.log_reliabilities = self.noise_config.calculate_log_reliabilities(error_rates)
 
-        self.edge_to_log_reliability = {}
-        for edge, value in zip(self.edge_list, self.log_reliabilities):
-            self.edge_to_log_reliability[edge] = value
-            self.edge_to_log_reliability[edge[::-1]] = value
+            self.edge_to_log_reliability = {}
+            for edge, value in zip(self.edge_list, self.log_reliabilities):
+                self.edge_to_log_reliability[edge] = value
+                self.edge_to_log_reliability[edge[::-1]] = value
 
     def copy(self) -> Self:
         """
@@ -272,7 +283,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     def _update_state(self):
         raise NotImplementedError
 
-    def _obs_spaces(self) -> Dict[str, spaces.Space]:
+    def _obs_spaces(self) -> dict[str, spaces.Space]:
         obs_spaces = {module.key(): module.space(self) for module in self.obs_modules}
 
         if self.rllib:
@@ -293,22 +304,52 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self._scheduling_reward = sum(self._gate_reward(nodes) for _, nodes in gates if len(nodes) == 2)
 
     def _schedulable_gates(self, only_front_layer: bool = False) -> GateSchedulingList:
-        gates = []
+        gates = OrderedSet()
         layers = [self.dag.front_layer()] if only_front_layer else dag_layers(self.dag)
-        locked_nodes = set()
+        locked_nodes: set[int] = set()
 
-        for layer in layers:
-            for op_node in layer:
-                indices = qubits_to_indices(self.circuit, op_node.qargs)
-                nodes = tuple(self.qubit_to_node[i] for i in indices)
+        commutation_set: Optional[dict] = (
+            self.commutation_pass.property_set['commutation_set'] if self.commutation_analysis
+            else None
+        )
 
-                if len(nodes) != 2 or self.coupling_map.has_edge(nodes[0], nodes[1]):
-                    if not locked_nodes.intersection(nodes):
-                        gates.append((op_node, nodes))
-                else:
-                    locked_nodes.update(nodes)
+        op_node: DAGOpNode
+        for op_node in itertools.chain(*layers):
+            indices = qubits_to_indices(self.circuit, op_node.qargs)
+            nodes = tuple(self.qubit_to_node[i] for i in indices)
 
-        return gates
+            if self._is_schedulable(nodes, locked_nodes):
+                gates.add((op_node, nodes))
+            else:
+                if self.commutation_analysis:
+                    free_qargs = (q for q in op_node.qargs if self.circuit.find_bit(q)[0] not in locked_nodes)
+                    for qubit in free_qargs:
+                        idx = commutation_set[(op_node, qubit)]
+                        commuting_op_nodes: OrderedSet[DAGOpNode] = OrderedSet(commutation_set[qubit][idx])
+
+                        commuting_op_nodes.remove(op_node)
+                        commuting_op_nodes.intersection_update(self.dag.gate_nodes())
+                        commuting_op_nodes.difference_update(gates)
+
+                        for commuting_op_node in commuting_op_nodes:
+                            commuting_indices = qubits_to_indices(self.circuit, commuting_op_node.qargs)
+                            commuting_nodes = tuple(self.qubit_to_node[i] for i in commuting_indices)
+
+                            if self._is_schedulable(commuting_nodes, locked_nodes):
+                                gates.add((commuting_op_node, commuting_nodes))
+
+                locked_nodes.update(nodes)
+
+            if len(locked_nodes) == self.num_qubits:
+                break
+
+        return list(gates)
+
+    def _is_schedulable(self, nodes: tuple[int, ...], locked_nodes: set[int]) -> bool:
+        valid_under_current_mapping = len(nodes) != 2 or self.coupling_map.has_edge(nodes[0], nodes[1])
+        not_blocked = not locked_nodes.intersection(nodes)
+
+        return valid_under_current_mapping and not_blocked
 
     def _bridge(self, control: int, middle: int, target: int):
         indices = (control, middle, target)
@@ -316,7 +357,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
         self.routed_gates.append((self.bridge_gate, qargs))
 
-    def _bridge_args(self, pair: Tuple[int, int]) -> Optional[BridgeArgs]:
+    def _bridge_args(self, pair: tuple[int, int]) -> Optional[BridgeArgs]:
         for op_node in self.dag.front_layer():
             if isinstance(op_node.op, CXGate):
                 indices = qubits_to_indices(self.circuit, op_node.qargs)
@@ -328,7 +369,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
         return None
 
-    def _swap(self, edge: Tuple[int, int]):
+    def _swap(self, edge: tuple[int, int]):
         qargs = indices_to_qubits(self.circuit, edge)
 
         self.routed_gates.append((self.swap_gate, qargs))
@@ -340,13 +381,13 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.node_to_qubit[node_a], self.node_to_qubit[node_b] = qubit_b, qubit_a
         self.qubit_to_node[qubit_a], self.qubit_to_node[qubit_b] = node_b, node_a
 
-    def _gate_reward(self, edge: Tuple[int, int]) -> float:
+    def _gate_reward(self, edge: tuple[int, int]) -> float:
         if self.noise_aware:
             return self.edge_to_log_reliability[edge] + self.noise_config.added_gate_reward
 
         return 1.0
 
-    def _swap_reward(self, edge: Tuple[int, int]) -> float:
+    def _swap_reward(self, edge: tuple[int, int]) -> float:
         if self.noise_aware:
             return 3.0 * self.edge_to_log_reliability[edge]
 
@@ -386,14 +427,15 @@ class SequentialRoutingEnv(RoutingEnv):
         circuit: Optional[QuantumCircuit] = None,
         initial_mapping: Optional[NDArray] = None,
         allow_bridge_gate: bool = True,
+        commutation_analysis: bool = True,
         error_rates: Optional[NDArray] = None,
         noise_config: Optional[NoiseConfig] = None,
-        obs_modules: Optional[List['ObsModule']] = None,
+        obs_modules: Optional[list['ObsModule']] = None,
         rllib: bool = False,
         restrict_swaps_to_front_layer: bool = True,
     ):
-        super().__init__(coupling_map, circuit, initial_mapping, allow_bridge_gate, error_rates, noise_config,
-                         obs_modules, rllib)
+        super().__init__(coupling_map, circuit, initial_mapping, allow_bridge_gate, commutation_analysis,
+                         error_rates, noise_config, obs_modules, rllib)
 
         self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
 
@@ -404,7 +446,7 @@ class SequentialRoutingEnv(RoutingEnv):
 
         self.observation_space = spaces.Dict(self._obs_spaces())
 
-    def step(self, action: int) -> Tuple[RoutingObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
+    def step(self, action: int) -> tuple[RoutingObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         if self.terminated:
             # Environment terminated immediately and does not require routing
             return self.current_obs(), 0.0, True, False, {}
@@ -435,7 +477,17 @@ class SequentialRoutingEnv(RoutingEnv):
         reward += self._scheduling_reward
         self._blocked_swap = action if action_is_swap and self._num_scheduled_2q_gates == 0 else None
 
-        return self.current_obs(), reward, self.terminated, False, {}
+        info = {}
+        if self.terminated:
+            swap_count = sum([op_node.name == 'swap' for op_node, _ in self.routed_gates])
+            bridge_count = sum([op_node.name == 'bridge' for op_node, _ in self.routed_gates])
+            added_cnots = 3 * (swap_count + bridge_count)
+
+            info['swap_count'] = swap_count
+            info['bridge_count'] = bridge_count
+            info['added_cnots'] = added_cnots
+
+        return self.current_obs(), reward, self.terminated, False, info
 
     def action_masks(self) -> NDArray:
         mask = np.ones(self.action_space.n, dtype=bool)
@@ -491,17 +543,18 @@ class QcpRoutingEnv(SequentialRoutingEnv):
         circuit: Optional[QuantumCircuit] = None,
         initial_mapping: Optional[NDArray] = None,
         allow_bridge_gate: bool = True,
+        commutation_analysis: bool = True,
         error_rates: Optional[NDArray] = None,
         noise_config: Optional[NoiseConfig] = None,
         rllib: bool = False,
         restrict_swaps_to_front_layer: bool = True,
     ):
-        super().__init__(coupling_map, circuit, initial_mapping, allow_bridge_gate, error_rates, noise_config,
-                         [CircuitMatrix(depth)], rllib, restrict_swaps_to_front_layer)
+        super().__init__(coupling_map, circuit, initial_mapping, allow_bridge_gate, commutation_analysis, error_rates,
+                         noise_config, [CircuitMatrix(depth)], rllib, restrict_swaps_to_front_layer)
 
 
 class SchedulingMap(MutableMapping[int, int]):
-    _map: Dict[int, int]
+    _map: dict[int, int]
 
     def __init__(self):
         self._map = {}
@@ -546,14 +599,15 @@ class LayeredRoutingEnv(RoutingEnv):
         circuit: Optional[QuantumCircuit] = None,
         initial_mapping: Optional[NDArray] = None,
         allow_bridge_gate: bool = True,
+        commutation_analysis: bool = True,
         error_rates: Optional[NDArray] = None,
         noise_config: Optional[NoiseConfig] = None,
-        obs_modules: Optional[List['ObsModule']] = None,
+        obs_modules: Optional[list['ObsModule']] = None,
         rllib: bool = False,
         use_decomposed_actions: bool = False,
     ):
-        super().__init__(coupling_map, circuit, initial_mapping, allow_bridge_gate, error_rates, noise_config,
-                         obs_modules, rllib)
+        super().__init__(coupling_map, circuit, initial_mapping, allow_bridge_gate, commutation_analysis, error_rates,
+                         noise_config, obs_modules, rllib)
 
         self.use_decomposed_actions = use_decomposed_actions
         self.scheduling_map = SchedulingMap()
@@ -564,7 +618,7 @@ class LayeredRoutingEnv(RoutingEnv):
 
         self.observation_space = spaces.Dict(self._obs_spaces())
 
-    def step(self, action: int) -> Tuple[RoutingObsType, SupportsFloat, bool, bool, Dict[str, Any]]:
+    def step(self, action: int) -> tuple[RoutingObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         if action < self.num_edges:
             # SWAP action
             edge = self.edge_list[action]
@@ -621,7 +675,7 @@ class LayeredRoutingEnv(RoutingEnv):
         super()._bridge(control, middle, target)
         self.scheduling_map.update_all((control, middle, target))
 
-    def _swap(self, edge: Tuple[int, int]):
+    def _swap(self, edge: tuple[int, int]):
         super()._swap(edge)
         self.scheduling_map.update_all(edge)
 
@@ -746,8 +800,8 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         self,
         *,
         seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None
-    ) -> Tuple[RoutingObsType, Dict[str, Any]]:
+        options: Optional[dict[str, Any]] = None
+    ) -> tuple[RoutingObsType, dict[str, Any]]:
         self.env.initial_mapping = _generate_random_mapping(self.num_qubits)
 
         if self.iter % self.training_iters == 0:
@@ -785,9 +839,6 @@ class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         noise_generation_config: Optional[NoiseGenerationConfig] = None,
         evaluation_iters: int = 20,
     ):
-        if (noise_generation_config is not None) != env.noise_aware:
-            raise ValueError('Noise-awareness mismatch between wrapper and env')
-
         self.circuit_generator = circuit_generator
         self.evaluation_iters = evaluation_iters
 
@@ -803,8 +854,8 @@ class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         self,
         *,
         seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None
-    ) -> Tuple[RoutingObsType, Dict[str, Any]]:
+        options: Optional[dict[str, Any]] = None
+    ) -> tuple[RoutingObsType, dict[str, Any]]:
         if self.iter % self.evaluation_iters == 0:
             self.env.circuit = self.circuit_generator.generate()
 

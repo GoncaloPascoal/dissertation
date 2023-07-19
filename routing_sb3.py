@@ -83,7 +83,7 @@ def main():
     args.model_path = f'models/{args.model}.model'
 
     # Parameters
-    n_steps = 2048
+    n_steps = 512
     noise_generation_config = NoiseGenerationConfig(1e-2, 3e-3)
 
     g = t_topology()
@@ -115,7 +115,7 @@ def main():
         }
 
         model = MaskablePPO(MaskableMultiInputActorCriticPolicy, vec_env, policy_kwargs=policy_kwargs, n_steps=n_steps,
-                            tensorboard_log='logs/routing', learning_rate=5e-5, stats_window_size=300)
+                            tensorboard_log='logs/routing', learning_rate=1e-4, stats_window_size=300)
 
         args.learn = True
         reset = True
