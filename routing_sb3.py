@@ -11,7 +11,7 @@ from rich import print
 from rustworkx.visualization import mpl_draw
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.policies import MaskableMultiInputActorCriticPolicy
-from stable_baselines3.common.vec_env import VecMonitor, DummyVecEnv
+from stable_baselines3.common.vec_env import VecMonitor, SubprocVecEnv
 from tqdm.rich import tqdm
 
 from routing.circuit_gen import RandomCircuitGenerator
@@ -66,7 +66,7 @@ def main():
     parser.add_argument('-r', '--routing-method', choices=['basic', 'stochastic', 'sabre'],
                         help='routing method for Qiskit compiler', default='sabre')
     parser.add_argument('-d', '--depth', metavar='D', help='depth of circuit observations', default=8, type=int)
-    parser.add_argument('--learning-iters', metavar='I', help='learning iterations', default=50, type=int)
+    parser.add_argument('--learning-iters', metavar='I', help='learning iterations', default=100, type=int)
     parser.add_argument('--training-iters', metavar='I', help='training episodes per circuit', default=1, type=int)
     parser.add_argument('--evaluation-iters', metavar='I', help='evaluation episodes per circuit', default=20,
                         type=int)
@@ -103,12 +103,12 @@ def main():
 
         # Only need to create vectorized environment when learning
         if args.learn:
-            vec_env = VecMonitor(DummyVecEnv([env_fn] * args.envs))
+            vec_env = VecMonitor(SubprocVecEnv([env_fn] * args.envs))
             model.set_env(vec_env)
 
         reset = False
     except FileNotFoundError:
-        vec_env = VecMonitor(DummyVecEnv([env_fn] * args.envs))
+        vec_env = VecMonitor(SubprocVecEnv([env_fn] * args.envs))
         policy_kwargs = {
             'net_arch': args.net_arch,
             'activation_fn': nn.SiLU,

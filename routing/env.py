@@ -115,6 +115,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     obs_modules: list['ObsModule']
 
     routed_gates: list[tuple[Operation, tuple[Qubit, ...]]]
+    routed_op_nodes: set[DAGOpNode]
     log_reliabilities: NDArray
     edge_to_log_reliability: dict[tuple[int, int], float]
 
@@ -180,6 +181,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
         self.dag = circuit_to_dag(self.circuit)
         self.routed_gates = []
+        self.routed_op_nodes = set()
 
         # Noise-awareness information
         if self.noise_aware:
@@ -214,6 +216,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     ) -> tuple[RoutingObsType, dict[str, Any]]:
         self.dag = circuit_to_dag(self.circuit)
         self.routed_gates = []
+        self.routed_op_nodes = set()
 
         if self.commutation_analysis:
             self.commutation_pass.run(self.dag)
@@ -294,11 +297,15 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
         return obs_spaces
 
+    def _remove_op_node(self, op_node: DAGOpNode):
+        self.dag.remove_op_node(op_node)
+        self.routed_op_nodes.add(op_node)
+
     def _schedule_gates(self, gates: GateSchedulingList):
         for op_node, nodes in gates:
             qargs = indices_to_qubits(self.circuit, nodes)
             self.routed_gates.append((op_node.op, qargs))
-            self.dag.remove_op_node(op_node)
+            self._remove_op_node(op_node)
 
         self._num_scheduled_2q_gates = len(gates)
         self._scheduling_reward = sum(self._gate_reward(nodes) for _, nodes in gates if len(nodes) == 2)
@@ -325,11 +332,9 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
                     free_qargs = (q for q in op_node.qargs if self.circuit.find_bit(q)[0] not in locked_nodes)
                     for qubit in free_qargs:
                         idx = commutation_set[(op_node, qubit)]
-                        commuting_op_nodes: OrderedSet[DAGOpNode] = OrderedSet(commutation_set[qubit][idx])
 
-                        commuting_op_nodes.remove(op_node)
-                        commuting_op_nodes.intersection_update(self.dag.gate_nodes())
-                        commuting_op_nodes.difference_update(gates)
+                        commuting_op_nodes: OrderedSet[DAGOpNode] = OrderedSet(commutation_set[qubit][idx])
+                        commuting_op_nodes.difference_update({op_node}, self.routed_op_nodes)
 
                         for commuting_op_node in commuting_op_nodes:
                             commuting_indices = qubits_to_indices(self.circuit, commuting_op_node.qargs)
@@ -466,7 +471,7 @@ class SequentialRoutingEnv(RoutingEnv):
             if args is not None:
                 op_node, nodes = args
 
-                self.dag.remove_op_node(op_node)
+                self._remove_op_node(op_node)
                 self._bridge(*nodes)
                 reward = self._bridge_reward(*nodes)
             else:
@@ -630,7 +635,7 @@ class LayeredRoutingEnv(RoutingEnv):
             pair = self.bridge_pairs[action - self.num_edges]
             op_node, nodes = self._bridge_args(pair)
 
-            self.dag.remove_op_node(op_node)
+            self._remove_op_node(op_node)
             self._bridge(*nodes)
             reward = self._bridge_reward(*nodes)
         else:
