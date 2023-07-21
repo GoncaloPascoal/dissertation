@@ -6,13 +6,13 @@ from collections import OrderedDict
 from collections.abc import MutableMapping, Iterable
 from dataclasses import dataclass, field
 from math import e
-from typing import Optional, Any, SupportsFloat, Iterator, Self, TypeVar, Generic, TypeAlias
+from typing import Optional, Any, SupportsFloat, Iterator, Self, TypeVar, Generic, TypeAlias, Literal
 
 import gymnasium as gym
 import numpy as np
 import rustworkx as rx
 from gymnasium import spaces
-from nptyping import NDArray
+from nptyping import NDArray, Int8
 from ordered_set import OrderedSet
 from qiskit import QuantumCircuit
 from qiskit.circuit import Qubit, Operation
@@ -276,7 +276,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         return dag_to_circuit(routed_dag)
 
     @abstractmethod
-    def action_masks(self) -> NDArray:
+    def action_masks(self) -> NDArray[Literal['*'], Int8]:
         """
         Returns a boolean NumPy array where the ith element is true if the ith action is valid in the current state.
         """
@@ -494,8 +494,8 @@ class SequentialRoutingEnv(RoutingEnv):
 
         return self.current_obs(), reward, self.terminated, False, info
 
-    def action_masks(self) -> NDArray:
-        mask = np.ones(self.action_space.n, dtype=bool)
+    def action_masks(self) -> NDArray[Literal['*'], Int8]:
+        mask = np.ones(self.action_space.n, dtype=Int8)
 
         # Swap actions
         if self.restrict_swaps_to_front_layer:
@@ -510,18 +510,18 @@ class SequentialRoutingEnv(RoutingEnv):
                 i for i, edge in enumerate(self.edge_list)
                 if not front_layer_nodes.intersection(edge)
             ]
-            mask[invalid_swap_actions] = False
+            mask[invalid_swap_actions] = 0
 
         # Disallow redundant consecutive SWAPs
         if self._blocked_swap is not None:
-            mask[self._blocked_swap] = False
+            mask[self._blocked_swap] = 0
 
         # Bridge actions
         invalid_bridge_actions = [
             self.num_edges + i for i, pair in enumerate(self.bridge_pairs)
             if self._bridge_args(pair) is None
         ]
-        mask[invalid_bridge_actions] = False
+        mask[invalid_bridge_actions] = 0
 
         return mask
 
@@ -645,8 +645,8 @@ class LayeredRoutingEnv(RoutingEnv):
 
         return self.current_obs(), reward, self.terminated, False, {}
 
-    def action_masks(self) -> NDArray:
-        mask = np.ones(self.action_space.n, dtype=bool)
+    def action_masks(self) -> NDArray[Literal['*'], Int8]:
+        mask = np.ones(self.action_space.n, dtype=Int8)
 
         # Swap actions
         invalid_swap_actions = [
@@ -654,7 +654,7 @@ class LayeredRoutingEnv(RoutingEnv):
             if self.scheduling_map.keys() & edge
         ]
 
-        mask[invalid_swap_actions] = False
+        mask[invalid_swap_actions] = 0
 
         # Bridge actions
         invalid_bridge_actions = []
@@ -663,11 +663,11 @@ class LayeredRoutingEnv(RoutingEnv):
             if args is None or self.scheduling_map.keys() & args[1]:
                 invalid_bridge_actions.append(self.num_edges + i)
 
-        mask[invalid_bridge_actions] = False
+        mask[invalid_bridge_actions] = 0
 
         # Cannot COMMIT an empty layer
         if not self.scheduling_map:
-            mask[-1] = False
+            mask[-1] = 0
 
         return mask
 

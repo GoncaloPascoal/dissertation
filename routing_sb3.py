@@ -55,8 +55,8 @@ def linear_topology(num_qubits: int) -> rx.PyGraph:
 
 def main():
     parser = ArgumentParser(
-        'qcp_routing',
-        description='Qubit routing with deep reinforcement learning',
+        'routing_sb3',
+        description='Qubit routing with deep reinforcement learning (stable-baselines3)',
     )
 
     parser.add_argument('-m', '--model', metavar='M', help='name of the model', required=True)
