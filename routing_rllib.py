@@ -31,6 +31,11 @@ def main():
 
     parser.add_argument('-g', '--num-gpus', metavar='G', type=int, default=0,
                         help='number of GPUs used for training (PPO has multi-GPU support)')
+    parser.add_argument('-w', '--workers', metavar='W', type=int, default=2, help='number of rollout workers')
+    parser.add_argument('-e', '--envs-per-worker', metavar='E', type=int, default=4,
+                        help='number of environments per rollout worker')
+
+    args = parser.parse_args()
 
     register_env('QcpRoutingEnv', env_creator)
 
@@ -55,14 +60,14 @@ def main():
             grad_clip=0.5,
             _enable_learner_api=False,
         )
-        .resources(num_gpus=0)
+        .resources(num_gpus=args.num_gpus)
         .rl_module(
             _enable_rl_module_api=False,
         )
         .rollouts(
             batch_mode='complete_episodes',
-            num_rollout_workers=3,
-            num_envs_per_worker=4,
+            num_rollout_workers=args.workers,
+            num_envs_per_worker=args.envs_per_worker,
         )
         .fault_tolerance(
             recreate_failed_workers=True,
