@@ -24,7 +24,7 @@ def env_creator(env_config: dict[str, Any]) -> gym.Env:
 
 def main():
     parser = ArgumentParser('train', description='Noise-Resilient Reinforcement Learning Strategies for Quantum'
-                                                 'Compiling. Model training script.')
+                                                 'Compiling (model training script)')
 
     parser.add_argument('-m', '--model', metavar='M', help='model name', required=True)
     parser.add_argument('-d', '--depth', metavar='D', type=int, default=8, help='depth of circuit observations')
