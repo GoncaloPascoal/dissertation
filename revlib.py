@@ -103,6 +103,11 @@ def convert_real_to_qasm(src: str, dst_dir: Optional[str] = None, *, basis_gates
     qc.qasm(filename=os.path.join(dst_dir, f'{file_name}.qasm'))
 
 
+def files_in_dir(path: str) -> list[str]:
+    files = [os.path.join(path, f) for f in os.listdir(path)]
+    return [f for f in files if os.path.isfile(f)]
+
+
 def batch_convert_real_to_qasm(
     src_dir: str,
     dst_dir: Optional[str] = None,
@@ -111,8 +116,7 @@ def batch_convert_real_to_qasm(
     condition: Optional[Callable[[str], bool]] = None,
     use_tqdm: bool = False,
 ):
-    files = [os.path.join(src_dir, f) for f in os.listdir(src_dir)]
-    files = [f for f in files if os.path.isfile(f)]
+    files = files_in_dir(src_dir)
 
     if use_tqdm:
         files = tqdm(files)

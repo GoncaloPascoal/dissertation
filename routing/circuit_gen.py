@@ -1,9 +1,11 @@
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Optional, Self
 
 import numpy as np
 from qiskit import QuantumCircuit
+
+from revlib import files_in_dir
 
 
 class CircuitGenerator(ABC):
@@ -67,7 +69,7 @@ class LayeredRandomCircuitGenerator(CircuitGenerator):
 
 
 class DatasetCircuitGenerator(CircuitGenerator):
-    def __init__(self, dataset: List[QuantumCircuit], random: bool = True, *, seed: Optional[int] = None):
+    def __init__(self, dataset: list[QuantumCircuit], *, random: bool = False, seed: Optional[int] = None):
         super().__init__(seed=seed)
 
         if not dataset:
@@ -76,6 +78,11 @@ class DatasetCircuitGenerator(CircuitGenerator):
         self.dataset = dataset
         self.random = random
         self.idx = 0
+
+    @classmethod
+    def from_dir(cls, path: str, *, random: bool = False, seed: Optional[int] = None) -> Self:
+        dataset = [QuantumCircuit.from_qasm_file(file_path) for file_path in files_in_dir(path)]
+        return cls(dataset, random=random, seed=seed)
 
     def generate(self) -> QuantumCircuit:
         if self.random:
