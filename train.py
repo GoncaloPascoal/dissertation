@@ -3,45 +3,49 @@ from argparse import ArgumentParser
 from typing import Any
 
 import gymnasium as gym
-import rustworkx as rx
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.tune import register_env
 
 from action_mask_model import ActionMaskModel
 from routing.circuit_gen import RandomCircuitGenerator
-from routing.env import TrainingWrapper, QcpRoutingEnv, NoiseGenerationConfig, NoiseConfig
-
-
-def t_topology() -> rx.PyGraph:
-    g = rx.PyGraph()
-    g.extend_from_edge_list([(0, 1), (1, 2), (1, 3), (3, 4)])
-    return g
+from routing.env import TrainingWrapper, CircuitMatrixRoutingEnv
+from routing.noise import NoiseConfig, UniformNoiseGenerator
+from routing.topology import t_topology
 
 
 def env_creator(env_config: dict[str, Any]) -> gym.Env:
     return TrainingWrapper(
-        QcpRoutingEnv(env_config['coupling_map'], 8, noise_config=NoiseConfig(), rllib=True),
+        CircuitMatrixRoutingEnv(env_config['coupling_map'], depth=env_config['depth'], noise_config=NoiseConfig()),
         env_config['circuit_generator'],
-        noise_generation_config=env_config.get('noise_generation_config'),
+        noise_generator=env_config.get('noise_generation_config'),
+        training_iters=env_config['training_iters'],
     )
 
 
 def main():
-    parser = ArgumentParser('routing_rllib')
+    parser = ArgumentParser('train', description='Noise-Resilient Reinforcement Learning Strategies for Quantum'
+                                                 'Compiling. Model training script.')
 
+    parser.add_argument('-m', '--model', metavar='M', help='model name', required=True)
+    parser.add_argument('-d', '--depth', metavar='D', type=int, default=8, help='depth of circuit observations')
     parser.add_argument('-g', '--num-gpus', metavar='G', type=int, default=0,
                         help='number of GPUs used for training (PPO has multi-GPU support)')
     parser.add_argument('-w', '--workers', metavar='W', type=int, default=2, help='number of rollout workers')
     parser.add_argument('-e', '--envs-per-worker', metavar='E', type=int, default=4,
                         help='number of environments per rollout worker')
+    parser.add_argument('-i', '--iters', metavar='I', type=int, default=100, help='training iterations')
+    parser.add_argument('--training-episodes', metavar='I', type=int, default=1, help='training episodes per circuit')
+    parser.add_argument('--circuit-size', metavar='S', type=int, default=64, help='random circuit gate count')
+    parser.add_argument('--net-arch', metavar='N', nargs='+', type=int, default=[64, 64, 96],
+                        help='neural network architecture (number of nodes in each hidden FC layer)')
 
     args = parser.parse_args()
 
-    register_env('QcpRoutingEnv', env_creator)
+    register_env('CircuitMatrixRoutingEnv', env_creator)
 
     g = t_topology()
-    circuit_generator = RandomCircuitGenerator(g.num_nodes(), 64)
-    noise_generation_config = NoiseGenerationConfig(1e-2, 3e-3)
+    circuit_generator = RandomCircuitGenerator(g.num_nodes(), args.circuit_size)
+    noise_generation_config = UniformNoiseGenerator(1e-2, 3e-3)
 
     config = (
         PPOConfig().training(
@@ -50,7 +54,7 @@ def main():
             lambda_=0.95,
             model={
                 'custom_model': ActionMaskModel,
-                'fcnet_hiddens': [64, 64, 96],
+                'fcnet_hiddens': args.net_arch,
                 'fcnet_activation': 'silu',
             },
             num_sgd_iter=10,
@@ -60,7 +64,9 @@ def main():
             grad_clip=0.5,
             _enable_learner_api=False,
         )
-        .resources(num_gpus=args.num_gpus)
+        .resources(
+            num_gpus=args.num_gpus,
+        )
         .rl_module(
             _enable_rl_module_api=False,
         )
@@ -75,21 +81,22 @@ def main():
         )
         .framework('torch')
         .environment(
-            env='QcpRoutingEnv',
+            env='CircuitMatrixRoutingEnv',
             env_config={
                 'coupling_map': g,
                 'circuit_generator': circuit_generator,
                 'noise_generation_config': noise_generation_config,
+                'training_iters': args.iters,
             }
         )
     )
 
     algorithm = config.build()
 
-    for _ in range(150):
+    for _ in range(args.training_iters):
         algorithm.train()
 
-    algorithm.save('models/rllib')
+    algorithm.save(f'models/{args.model}')
 
 
 if __name__ == '__main__':
