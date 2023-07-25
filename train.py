@@ -43,7 +43,7 @@ def main():
                         help='stochastic gradient descent minibatch size')
     parser.add_argument('--net-arch', metavar='N', nargs='+', type=int, default=[64, 64, 96],
                         help='neural network architecture (number of nodes in each hidden FC layer)')
-    parser.add_argument('--sgd-iters', metavar='N', type=int, default=128,
+    parser.add_argument('--sgd-iters', metavar='N', type=int, default=10,
                         help='stochastic gradient descent iterations per batch')
 
     args = parser.parse_args()
