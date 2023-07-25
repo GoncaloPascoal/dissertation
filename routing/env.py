@@ -4,7 +4,7 @@ import itertools
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from collections.abc import MutableMapping, Iterable
-from typing import Optional, Any, SupportsFloat, Iterator, Self, TypeVar, Generic, TypeAlias, Literal
+from typing import Optional, Any, SupportsFloat, Iterator, Self, Generic, TypeAlias, Literal
 
 import gymnasium as gym
 import numpy as np
@@ -12,7 +12,7 @@ import rustworkx as rx
 from gymnasium import spaces
 from nptyping import NDArray, Int8
 from ordered_set import OrderedSet
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit, AncillaRegister
 from qiskit.circuit import Qubit, Operation
 from qiskit.circuit.library import SwapGate, CXGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
@@ -20,8 +20,8 @@ from qiskit.dagcircuit import DAGOpNode
 from qiskit.transpiler.passes import CommutationAnalysis
 
 from dag_utils import dag_layers
-from routing.circuit_gen import CircuitGenerator
-from routing.noise import NoiseConfig, NoiseGenerator
+from routing.env_wrapper import _RoutingEnvType
+from routing.noise import NoiseConfig
 from utils import qubits_to_indices, indices_to_qubits
 
 RoutingObsType: TypeAlias = dict[str, NDArray]
@@ -157,6 +157,9 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         seed: Optional[int] = None,
         options: Optional[dict[str, Any]] = None,
     ) -> tuple[RoutingObsType, dict[str, Any]]:
+        if self.circuit.num_qubits < self.num_qubits:
+            self.circuit.add_register(AncillaRegister(self.num_qubits - self.circuit.num_qubits))
+
         self.dag = circuit_to_dag(self.circuit)
         self.routed_gates = []
         self.routed_op_nodes = set()
@@ -414,17 +417,7 @@ class SequentialRoutingEnv(RoutingEnv):
         reward += self._scheduling_reward
         self._blocked_swap = action if action_is_swap and self._num_scheduled_2q_gates == 0 else None
 
-        info = {}
-        if self.terminated:
-            swap_count = sum([op_node.name == 'swap' for op_node, _ in self.routed_gates])
-            bridge_count = sum([op_node.name == 'bridge' for op_node, _ in self.routed_gates])
-            added_cnots = 3 * (swap_count + bridge_count)
-
-            info['swap_count'] = swap_count
-            info['bridge_count'] = bridge_count
-            info['added_cnots'] = added_cnots
-
-        return self.current_obs(), reward, self.terminated, False, info
+        return self.current_obs(), reward, self.terminated, False, {}
 
     def action_mask(self) -> NDArray[Literal['*'], Int8]:
         mask = np.ones(self.action_space.n, dtype=Int8)
@@ -631,118 +624,6 @@ class LayeredRoutingEnv(RoutingEnv):
 
         gates = self._schedulable_gates(only_front_layer=True)
         self._schedule_gates(gates)
-
-
-_RoutingEnvType = TypeVar('_RoutingEnvType', bound=RoutingEnv)
-
-
-def _generate_random_mapping(num_qubits: int) -> NDArray:
-    mapping = np.arange(num_qubits)
-    np.random.shuffle(mapping)
-    return mapping
-
-
-class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
-    """
-    Wraps a :py:class:`RoutingEnv`, automatically generating circuits and gate error rates at fixed intervals to
-    help train deep learning algorithms.
-
-    :param env: :py:class:`RoutingEnv` to wrap.
-    :param circuit_generator: Random circuit generator to be used during training.
-    :param noise_generator: Generator for two-qubit gate error rates. Should be provided iff the environment is
-                            noise-aware.
-    :param training_iters: Number of episodes per generated circuit.
-
-    :ivar iter: Current training iteration.
-    """
-
-    env: RoutingEnv
-    noise_generator: Optional[NoiseGenerator]
-
-    def __init__(
-        self,
-        env: RoutingEnv,
-        circuit_generator: CircuitGenerator,
-        noise_generator: Optional[NoiseGenerator] = None,
-        training_iters: int = 1,
-    ):
-        if (noise_generator is not None) != env.noise_aware:
-            raise ValueError('Noise-awareness mismatch between wrapper and env')
-
-        self.circuit_generator = circuit_generator
-        self.noise_generator = noise_generator
-        self.training_iters = training_iters
-
-        super().__init__(env)
-
-        self.iter = 0
-
-    def reset(
-        self,
-        *,
-        seed: Optional[int] = None,
-        options: Optional[dict[str, Any]] = None
-    ) -> tuple[RoutingObsType, dict[str, Any]]:
-        self.env.initial_mapping = _generate_random_mapping(self.num_qubits)
-
-        if self.iter % self.training_iters == 0:
-            self.env.circuit = self.circuit_generator.generate()
-
-        if self.noise_aware and self.iter % self.noise_generator.recalibration_interval == 0:
-            error_rates = self.noise_generator.generate_error_rates(self.num_edges)
-            self.env.calibrate(error_rates)
-
-        self.iter += 1
-
-        return super().reset(seed=seed, options=options)
-
-
-class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
-    """
-    Wraps a :py:class:`RoutingEnv`, automatically generating circuits to evaluate the performance of a reinforcement
-    learning model.
-
-    :param env: :py:class:`RoutingEnv` to wrap.
-    :param circuit_generator: Random circuit generator to be used during training.
-    :param noise_generator: Generator for two-qubit gate error rates. Should be provided iff the environment is
-                            noise-aware. As this is an evaluation environment, the error rates are only generated once.
-    :param evaluation_iters: Number of evaluation iterations per generated circuit.
-
-    :ivar iter: Current training iteration.
-    """
-
-    env: RoutingEnv
-
-    def __init__(
-        self,
-        env: RoutingEnv,
-        circuit_generator: CircuitGenerator,
-        noise_generator: Optional[NoiseGenerator] = None,
-        evaluation_iters: int = 20,
-    ):
-        self.circuit_generator = circuit_generator
-        self.evaluation_iters = evaluation_iters
-
-        if noise_generator is not None:
-            env.calibrate(noise_generator.generate_error_rates(env.num_edges))
-        env.initial_mapping = _generate_random_mapping(env.num_qubits)
-
-        super().__init__(env)
-
-        self.iter = 0
-
-    def reset(
-        self,
-        *,
-        seed: Optional[int] = None,
-        options: Optional[dict[str, Any]] = None
-    ) -> tuple[RoutingObsType, dict[str, Any]]:
-        if self.iter % self.evaluation_iters == 0:
-            self.env.circuit = self.circuit_generator.generate()
-
-        self.iter += 1
-
-        return super().reset(seed=seed, options=options)
 
 
 class ObsModule(ABC, Generic[_RoutingEnvType]):

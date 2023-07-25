@@ -8,7 +8,8 @@ from ray.tune import register_env
 
 from action_mask_model import ActionMaskModel
 from routing.circuit_gen import RandomCircuitGenerator
-from routing.env import TrainingWrapper, CircuitMatrixRoutingEnv
+from routing.env import CircuitMatrixRoutingEnv
+from routing.env_wrapper import TrainingWrapper
 from routing.noise import NoiseConfig, UniformNoiseGenerator
 from routing.topology import t_topology
 
@@ -17,25 +18,26 @@ def env_creator(env_config: dict[str, Any]) -> gym.Env:
     return TrainingWrapper(
         CircuitMatrixRoutingEnv(env_config['coupling_map'], depth=env_config['depth'], noise_config=NoiseConfig()),
         env_config['circuit_generator'],
-        noise_generator=env_config.get('noise_generation_config'),
+        noise_generator=env_config.get('noise_generator'),
         training_iters=env_config['training_iters'],
     )
 
 
 def main():
-    parser = ArgumentParser('train', description='Noise-Resilient Reinforcement Learning Strategies for Quantum'
+    parser = ArgumentParser('train', description='Noise-Resilient Reinforcement Learning Strategies for Quantum '
                                                  'Compiling (model training script)')
 
     parser.add_argument('-m', '--model', metavar='M', help='model name', required=True)
-    parser.add_argument('-d', '--depth', metavar='D', type=int, default=8, help='depth of circuit observations')
-    parser.add_argument('-g', '--num-gpus', metavar='G', type=int, default=0,
-                        help='number of GPUs used for training (PPO has multi-GPU support)')
-    parser.add_argument('-w', '--workers', metavar='W', type=int, default=2, help='number of rollout workers')
-    parser.add_argument('-e', '--envs-per-worker', metavar='E', type=int, default=4,
+    parser.add_argument('-d', '--depth', metavar='N', type=int, default=8, help='depth of circuit observations')
+    parser.add_argument('-g', '--num-gpus', metavar='N', type=float, default=0.0,
+                        help='number of GPUs used for training (PPO has multi-GPU support), can be fractional')
+    parser.add_argument('-w', '--workers', metavar='N', type=int, default=2, help='number of rollout workers')
+    parser.add_argument('-e', '--envs-per-worker', metavar='N', type=int, default=4,
                         help='number of environments per rollout worker')
-    parser.add_argument('-i', '--iters', metavar='I', type=int, default=100, help='training iterations')
-    parser.add_argument('--training-episodes', metavar='I', type=int, default=1, help='training episodes per circuit')
-    parser.add_argument('--circuit-size', metavar='S', type=int, default=64, help='random circuit gate count')
+    parser.add_argument('-i', '--iters', metavar='N', type=int, default=100, help='training iterations')
+    parser.add_argument('--batch-size', metavar='N', type=int, default=8192, help='training batch size')
+    parser.add_argument('--training-episodes', metavar='N', type=int, default=1, help='training episodes per circuit')
+    parser.add_argument('--circuit-size', metavar='N', type=int, default=64, help='random circuit gate count')
     parser.add_argument('--net-arch', metavar='N', nargs='+', type=int, default=[64, 64, 96],
                         help='neural network architecture (number of nodes in each hidden FC layer)')
 
@@ -45,7 +47,7 @@ def main():
 
     g = t_topology()
     circuit_generator = RandomCircuitGenerator(g.num_nodes(), args.circuit_size)
-    noise_generation_config = UniformNoiseGenerator(1e-2, 3e-3)
+    noise_generator = UniformNoiseGenerator(1e-2, 3e-3)
 
     config = (
         PPOConfig().training(
@@ -59,7 +61,7 @@ def main():
             },
             num_sgd_iter=10,
             sgd_minibatch_size=64,
-            train_batch_size=12 * 512,
+            train_batch_size=args.batch_size,
             vf_loss_coeff=0.5,
             grad_clip=0.5,
             _enable_learner_api=False,
@@ -84,16 +86,17 @@ def main():
             env='CircuitMatrixRoutingEnv',
             env_config={
                 'coupling_map': g,
+                'depth': args.depth,
                 'circuit_generator': circuit_generator,
-                'noise_generation_config': noise_generation_config,
-                'training_iters': args.iters,
+                'noise_generator': noise_generator,
+                'training_iters': args.training_episodes,
             }
         )
     )
 
     algorithm = config.build()
 
-    for _ in range(args.training_iters):
+    for _ in range(args.iters):
         algorithm.train()
 
     algorithm.save(f'models/{args.model}')
