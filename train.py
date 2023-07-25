@@ -36,6 +36,8 @@ def main():
                         help='number of environments per rollout worker')
     parser.add_argument('-i', '--iters', metavar='N', type=int, default=100, help='training iterations')
     parser.add_argument('--batch-size', metavar='N', type=int, default=8192, help='training batch size')
+    parser.add_argument('--minibatch-size', metavar='N', type=int, default=128,
+                        help='stochastic gradient descent minibatch size')
     parser.add_argument('--training-episodes', metavar='N', type=int, default=1, help='training episodes per circuit')
     parser.add_argument('--circuit-size', metavar='N', type=int, default=64, help='random circuit gate count')
     parser.add_argument('--net-arch', metavar='N', nargs='+', type=int, default=[64, 64, 96],
@@ -60,7 +62,7 @@ def main():
                 'fcnet_activation': 'silu',
             },
             num_sgd_iter=10,
-            sgd_minibatch_size=64,
+            sgd_minibatch_size=args.minibatch_size,
             train_batch_size=args.batch_size,
             vf_loss_coeff=0.5,
             grad_clip=0.5,
