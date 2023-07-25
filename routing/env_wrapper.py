@@ -1,5 +1,5 @@
 
-from typing import TypeVar, Optional, Any
+from typing import Optional, Any
 
 import gymnasium as gym
 import numpy as np
@@ -8,8 +8,6 @@ from nptyping import NDArray
 from routing.circuit_gen import CircuitGenerator
 from routing.env import RoutingEnv, RoutingObsType
 from routing.noise import NoiseGenerator
-
-_RoutingEnvType = TypeVar('_RoutingEnvType', bound=RoutingEnv)
 
 
 def _generate_random_mapping(num_qubits: int) -> NDArray:

@@ -4,7 +4,7 @@ import itertools
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from collections.abc import MutableMapping, Iterable
-from typing import Optional, Any, SupportsFloat, Iterator, Self, Generic, TypeAlias, Literal
+from typing import Optional, Any, SupportsFloat, Iterator, Self, Generic, TypeAlias, Literal, TypeVar
 
 import gymnasium as gym
 import numpy as np
@@ -20,7 +20,6 @@ from qiskit.dagcircuit import DAGOpNode
 from qiskit.transpiler.passes import CommutationAnalysis
 
 from dag_utils import dag_layers
-from routing.env_wrapper import _RoutingEnvType
 from routing.noise import NoiseConfig
 from utils import qubits_to_indices, indices_to_qubits
 
@@ -624,6 +623,9 @@ class LayeredRoutingEnv(RoutingEnv):
 
         gates = self._schedulable_gates(only_front_layer=True)
         self._schedule_gates(gates)
+
+
+_RoutingEnvType = TypeVar('_RoutingEnvType', bound=RoutingEnv)
 
 
 class ObsModule(ABC, Generic[_RoutingEnvType]):
