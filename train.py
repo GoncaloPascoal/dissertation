@@ -35,13 +35,16 @@ def main():
     parser.add_argument('-e', '--envs-per-worker', metavar='N', type=int, default=4,
                         help='number of environments per rollout worker')
     parser.add_argument('-i', '--iters', metavar='N', type=int, default=100, help='training iterations')
+    parser.add_argument('--circuit-size', metavar='N', type=int, default=64, help='random circuit gate count')
+    parser.add_argument('--training-episodes', metavar='N', type=int, default=1, help='training episodes per circuit')
     parser.add_argument('--batch-size', metavar='N', type=int, default=8192, help='training batch size')
+    parser.add_argument('--lr', metavar='N', type=float, default=1e-4, help='learning rate')
     parser.add_argument('--minibatch-size', metavar='N', type=int, default=128,
                         help='stochastic gradient descent minibatch size')
-    parser.add_argument('--training-episodes', metavar='N', type=int, default=1, help='training episodes per circuit')
-    parser.add_argument('--circuit-size', metavar='N', type=int, default=64, help='random circuit gate count')
     parser.add_argument('--net-arch', metavar='N', nargs='+', type=int, default=[64, 64, 96],
                         help='neural network architecture (number of nodes in each hidden FC layer)')
+    parser.add_argument('--sgd--iters', metavar='N', type=int, default=128,
+                        help='stochastic gradient descent iterations per batch')
 
     args = parser.parse_args()
 
@@ -54,14 +57,14 @@ def main():
     config = (
         PPOConfig().training(
             clip_param=0.2,
-            lr=1e-4,
+            lr=args.lr,
             lambda_=0.95,
             model={
                 'custom_model': ActionMaskModel,
                 'fcnet_hiddens': args.net_arch,
                 'fcnet_activation': 'silu',
             },
-            num_sgd_iter=10,
+            num_sgd_iter=args.sgd_iters,
             sgd_minibatch_size=args.minibatch_size,
             train_batch_size=args.batch_size,
             vf_loss_coeff=0.5,
