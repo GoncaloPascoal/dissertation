@@ -628,6 +628,15 @@ class LayeredRoutingEnv(RoutingEnv):
 _RoutingEnvType = TypeVar('_RoutingEnvType', bound=RoutingEnv)
 
 
+class RoutingEnvCreator(Generic[_RoutingEnvType]):
+    def __init__(self, env_class: type[_RoutingEnvType], **kwargs):
+        self.env_class = env_class
+        self.kwargs = kwargs
+
+    def create(self) -> _RoutingEnvType:
+        return self.env_class(**self.kwargs)
+
+
 class ObsModule(ABC, Generic[_RoutingEnvType]):
     @staticmethod
     @abstractmethod

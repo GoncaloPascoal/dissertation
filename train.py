@@ -19,7 +19,7 @@ def env_creator(env_config: dict[str, Any]) -> gym.Env:
         CircuitMatrixRoutingEnv(env_config['coupling_map'], depth=env_config['depth'], noise_config=NoiseConfig()),
         env_config['circuit_generator'],
         noise_generator=env_config.get('noise_generator'),
-        training_iters=env_config['training_iters'],
+        episodes_per_circuit=env_config['episodes_per_circuit'],
     )
 
 
@@ -36,7 +36,8 @@ def main():
                         help='number of environments per rollout worker')
     parser.add_argument('-i', '--iters', metavar='N', type=int, default=100, help='training iterations')
     parser.add_argument('--circuit-size', metavar='N', type=int, default=64, help='random circuit gate count')
-    parser.add_argument('--training-episodes', metavar='N', type=int, default=1, help='training episodes per circuit')
+    parser.add_argument('--episodes-per-circuit', metavar='N', type=int, default=1,
+                        help='training episodes per circuit')
     parser.add_argument('--batch-size', metavar='N', type=int, default=8192, help='training batch size')
     parser.add_argument('--lr', metavar='N', type=float, default=1e-4, help='learning rate')
     parser.add_argument('--minibatch-size', metavar='N', type=int, default=128,
@@ -78,7 +79,7 @@ def main():
                 'depth': args.depth,
                 'circuit_generator': circuit_generator,
                 'noise_generator': noise_generator,
-                'training_iters': args.training_episodes,
+                'episodes_per_circuit': args.episodes_per_circuit,
             }
         )
         .fault_tolerance(

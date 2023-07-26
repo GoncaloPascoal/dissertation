@@ -1,16 +1,12 @@
 
-env_config_path: 'env.yaml'
-
-model:
-  fcnet_hiddens: [64, 64, 96]
+env_config_path: 'config/env.yaml'
 
 circuit_generator:
   type: 'random'
   args:
+    num_qubits: 5
     num_gates: 64
 
-noise_generator:
-  type: 'uniform'
-
-learning_iters: 100
-n_steps: 2048
+hidden_layers: [64, 64, 96]
+minibatch_size: 256
+batch_size: 2048

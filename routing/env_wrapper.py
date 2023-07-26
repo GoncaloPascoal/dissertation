@@ -25,7 +25,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
     :param circuit_generator: Random circuit generator to be used during training.
     :param noise_generator: Generator for two-qubit gate error rates. Should be provided iff the environment is
                             noise-aware.
-    :param training_iters: Number of episodes per generated circuit.
+    :param episodes_per_circuit: Number of episodes per generated circuit.
 
     :ivar iter: Current training iteration.
     """
@@ -38,14 +38,14 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
         noise_generator: Optional[NoiseGenerator] = None,
-        training_iters: int = 1,
+        episodes_per_circuit: int = 1,
     ):
         if (noise_generator is not None) != env.noise_aware:
             raise ValueError('Noise-awareness mismatch between wrapper and env')
 
         self.circuit_generator = circuit_generator
         self.noise_generator = noise_generator
-        self.training_iters = training_iters
+        self.episodes_per_circuit = episodes_per_circuit
 
         super().__init__(env)
 
@@ -59,7 +59,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
     ) -> tuple[RoutingObsType, dict[str, Any]]:
         self.env.initial_mapping = _generate_random_mapping(self.num_qubits)
 
-        if self.iter % self.training_iters == 0:
+        if self.iter % self.episodes_per_circuit == 0:
             self.env.circuit = self.circuit_generator.generate()
 
         if self.noise_aware and self.iter % self.noise_generator.recalibration_interval == 0:
