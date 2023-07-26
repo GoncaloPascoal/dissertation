@@ -1,0 +1,16 @@
+
+env_config_path: 'env.yaml'
+
+model:
+  fcnet_hiddens: [64, 64, 96]
+
+circuit_generator:
+  type: 'random'
+  args:
+    num_gates: 64
+
+noise_generator:
+  type: 'uniform'
+
+learning_iters: 100
+n_steps: 2048

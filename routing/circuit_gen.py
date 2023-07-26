@@ -39,7 +39,7 @@ class RandomCircuitGenerator(CircuitGenerator):
         return qc
 
 
-class LayeredRandomCircuitGenerator(CircuitGenerator):
+class LayeredCircuitGenerator(CircuitGenerator):
     def __init__(self, num_qubits: int, num_layers: int = 1, density: float = 1.0, *, seed: Optional[int] = None):
         super().__init__(seed=seed)
 

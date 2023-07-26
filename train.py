@@ -71,6 +71,21 @@ def main():
             grad_clip=0.5,
             _enable_learner_api=False,
         )
+        .environment(
+            env='CircuitMatrixRoutingEnv',
+            env_config={
+                'coupling_map': g,
+                'depth': args.depth,
+                'circuit_generator': circuit_generator,
+                'noise_generator': noise_generator,
+                'training_iters': args.training_episodes,
+            }
+        )
+        .fault_tolerance(
+            recreate_failed_workers=True,
+            restart_failed_sub_environments=True,
+        )
+        .framework('torch')
         .resources(
             num_gpus=args.num_gpus,
         )
@@ -81,21 +96,6 @@ def main():
             batch_mode='complete_episodes',
             num_rollout_workers=args.workers,
             num_envs_per_worker=args.envs_per_worker,
-        )
-        .fault_tolerance(
-            recreate_failed_workers=True,
-            restart_failed_sub_environments=True,
-        )
-        .framework('torch')
-        .environment(
-            env='CircuitMatrixRoutingEnv',
-            env_config={
-                'coupling_map': g,
-                'depth': args.depth,
-                'circuit_generator': circuit_generator,
-                'noise_generator': noise_generator,
-                'training_iters': args.training_episodes,
-            }
         )
     )
 
