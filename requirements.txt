@@ -7,7 +7,4 @@ ray[rllib]>=2.6
 rich>=13.3
 rustworkx>=0.12
 torch>=2.0
-torch-geometric>=2.3
-stable-baselines3>=2.0
-sb3-contrib>=2.0
 tqdm>=4.65

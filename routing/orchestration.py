@@ -1,13 +1,16 @@
-from collections.abc import Sequence
-from typing import Any, ClassVar, Literal, Optional, Self
 
+from collections.abc import Sequence, Collection
+from typing import Any, ClassVar, Optional, Self
+
+from qiskit.transpiler import CouplingMap
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.tune import register_env
+from tqdm.rich import tqdm
 
 from action_mask_model import ActionMaskModel
-from routing.circuit_gen import CircuitGenerator
-from routing.env import RoutingEnvCreator
-from routing.env_wrapper import TrainingWrapper
+from routing.circuit_gen import CircuitGenerator, DatasetCircuitGenerator
+from routing.env import RoutingEnvCreator, RoutingEnv
+from routing.env_wrapper import TrainingWrapper, EvaluationWrapper
 from routing.noise import NoiseGenerator
 
 
@@ -23,7 +26,7 @@ class TrainingOrchestrator:
         training_iters: int = 1,
         lr: float = 1e-4,
         hidden_layers: Optional[Sequence[int]] = None,
-        activation_fn: Literal['relu', 'silu', 'tanh'] = 'silu',
+        activation_fn: str = 'silu',
         batch_size: int = 8192,
         minibatch_size: int = 128,
         sgd_iters: int = 10,
@@ -31,6 +34,9 @@ class TrainingOrchestrator:
         num_workers: int = 2,
         envs_per_worker: int = 4,
     ):
+        if hidden_layers is None:
+            hidden_layers = [64, 64]
+
         # TODO: maybe refactor
         def create_env(_config: dict[str, Any]) -> TrainingWrapper:
             return TrainingWrapper(env_creator.create(), circuit_generator, noise_generator, training_iters)
@@ -85,3 +91,60 @@ class TrainingOrchestrator:
 
     def save(self, path: str) -> str:
         return self.algorithm.save(path)
+
+
+class EvaluationOrchestrator:
+    reliability_map: dict[tuple[int, int], float]
+
+    def __init__(
+        self,
+        algorithm: PPO,
+        env: RoutingEnv,
+        circuit_generator: CircuitGenerator,
+        *,
+        noise_generator: Optional[NoiseGenerator] = None,
+        evaluation_iters: int = 20,
+        num_episodes: Optional[int] = None,
+        routing_methods: str | Collection[str] = 'sabre',
+        use_tqdm: bool = False,
+    ):
+        if num_episodes is None:
+            if isinstance(circuit_generator, DatasetCircuitGenerator):
+                num_episodes = len(circuit_generator.dataset)
+            else:
+                num_episodes = 100
+
+        self.algorithm = algorithm
+        self.eval_env = EvaluationWrapper(
+            env,
+            circuit_generator,
+            noise_generator=noise_generator,
+            evaluation_iters=evaluation_iters,
+        )
+
+        self.num_episodes = num_episodes
+        self.routing_methods = [routing_methods] if isinstance(routing_methods, str) else list(routing_methods)
+        self.use_tqdm = use_tqdm
+
+        self.env = self.eval_env.env
+        self.initial_layout = env.qubit_to_node.tolist()
+        self.qiskit_coupling_map = CouplingMap(env.coupling_map.to_directed().edge_list())
+
+        self.reliability_map = {}
+        for edge, error_rate in zip(env.coupling_map, env.error_rates):  # type: ignore
+            reliability = 1.0 - error_rate
+            self.reliability_map[edge] = reliability
+            self.reliability_map[edge[::-1]] = reliability
+
+        self.reset_metrics()
+
+    def reset_metrics(self):
+        raise NotImplementedError
+
+    def evaluate(self):
+        iterable = range(self.num_episodes)
+        if self.use_tqdm:
+            iterable = tqdm(iterable)
+
+        for _ in iterable:
+            pass

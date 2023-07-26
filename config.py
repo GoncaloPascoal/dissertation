@@ -7,16 +7,11 @@ import rustworkx as rx
 import yaml
 
 from routing.circuit_gen import CircuitGenerator, RandomCircuitGenerator, LayeredCircuitGenerator
-from routing.env import RoutingEnv, RoutingEnvCreator, SequentialRoutingEnv, LayeredRoutingEnv, CircuitMatrix, ObsModule
-from routing.noise import NoiseConfig, UniformNoiseGenerator
+from routing.env import RoutingEnvCreator, CircuitMatrix, ObsModule
+from routing.noise import NoiseConfig, UniformNoiseGenerator, NoiseGenerator
 from routing.orchestration import TrainingOrchestrator
 from routing.topology import t_topology, h_topology, grid_topology, linear_topology
 
-
-ROUTING_ENVS: Final[dict[str, type[RoutingEnv]]] = {
-    'sequential': SequentialRoutingEnv,
-    'layered': LayeredRoutingEnv,
-}
 
 OBS_MODULES: Final[dict[str, type[ObsModule]]] = {
     'circuit_matrix': CircuitMatrix,
@@ -34,16 +29,19 @@ CIRCUIT_GENERATORS: Final[dict[str, type[CircuitGenerator]]] = {
     'layered': LayeredCircuitGenerator,
 }
 
+NOISE_GENERATORS: Final[dict[str, type[NoiseGenerator]]] = {
+    'uniform': UniformNoiseGenerator,
+}
+
 
 def parse_yaml(path: str) -> dict[str, Any]:
-    with open(path, 'rb') as f:
+    with open(path, 'r') as f:
         return yaml.safe_load(f)
 
 
 def parse_env_config(path: str) -> RoutingEnvCreator:
     config = parse_yaml(path)
 
-    env_class = ROUTING_ENVS[config.get('type', 'sequential')]
     coupling_map_config: dict[str, Any] | str | list = config['coupling_map']
 
     if isinstance(coupling_map_config, dict):
@@ -54,36 +52,38 @@ def parse_env_config(path: str) -> RoutingEnvCreator:
         coupling_map = rx.PyGraph()
         coupling_map.extend_from_edge_list(coupling_map_config)
     else:
-        raise ValueError('Invalid coupling map configuration')
+        raise ValueError(f'Coupling map configuration has invalid type `{type(coupling_map_config)}`')
 
     noise_config = NoiseConfig() if config.get('noise_aware', True) else None
 
     obs_modules = []
     obs_modules_config: list[str | dict[str, Any]] = config.get('obs_modules', [])
-    for c in obs_modules_config:
-        if isinstance(c, str):
-            obs_modules.append(OBS_MODULES[c]())
-        elif isinstance(c, dict):
-            obs_modules.append(OBS_MODULES[c['type']](**c['args']))  # type: ignore
+    for om_config in obs_modules_config:
+        if isinstance(om_config, str):
+            obs_modules.append(OBS_MODULES[om_config]())
+        elif isinstance(om_config, dict):
+            obs_modules.append(OBS_MODULES[om_config['type']](**om_config['args']))  # type: ignore
         else:
-            raise ValueError('Invalid observation module configuration')
+            raise ValueError(f'Observation module configuration has invalid type `{type(om_config)}`')
 
     return RoutingEnvCreator(
-        env_class,
         coupling_map=coupling_map,
         noise_config=noise_config,
         obs_modules=obs_modules,
         **config.get('args', {})
     )
 
-def parse_train_config(path: str) -> TrainingOrchestrator:
-    config = parse_yaml(path)
-    env_creator = parse_env_config(config['env_config_path'])
+def parse_train_config(env_path: str, train_path: str) -> TrainingOrchestrator:
+    env_creator = parse_env_config(env_path)
+    config = parse_yaml(train_path)
 
-    circuit_generator_config: dict[str, Any] | str = config['circuit_generator']
-    circuit_generator = CIRCUIT_GENERATORS[circuit_generator_config['type']](**circuit_generator_config['args'])
+    cg_config: dict[str, Any] = config['circuit_generator']
+    cg_type, cg_args = cg_config['type'], cg_config['args']
+    circuit_generator = CIRCUIT_GENERATORS[cg_type](**cg_args)
 
-    noise_generator = UniformNoiseGenerator(1e-2, 3e-3)
+    ng_config: dict[str, Any] = config['noise_generator']
+    ng_type, ng_args = ng_config['type'], ng_config['args']
+    noise_generator = NOISE_GENERATORS[ng_type](**ng_args)
 
     return TrainingOrchestrator(
         env_creator,
@@ -92,19 +92,21 @@ def parse_train_config(path: str) -> TrainingOrchestrator:
         **config.get('args', {}),
     )
 
-def parse_eval_config(path: str):
-    config = parse_yaml(path)
+def parse_eval_config(env_path: str, eval_path: str):
+    env_creator = parse_env_config(env_path)
+    config = parse_yaml(eval_path)
+
     # TODO
 
 
 def main():
     parser = ArgumentParser('yaml', description='Qubit routing with deep reinforcement learning')
-    parser.add_argument('config_path', help='path to configuration file')
+    parser.add_argument('env_config', help='path to environment configuration file')
+    parser.add_argument('train_config', help='path to training configuration file')
 
     args = parser.parse_args()
 
-    orchestrator = parse_train_config(args.config_path)
-    print(orchestrator.algorithm)
+    orchestrator = parse_train_config(args.env_config, args.train_config)
 
 
 if __name__ == '__main__':

@@ -3,14 +3,14 @@ import copy
 import itertools
 from abc import ABC, abstractmethod
 from collections import OrderedDict
-from collections.abc import MutableMapping, Iterable
-from typing import Optional, Any, SupportsFloat, Iterator, Self, Generic, TypeAlias, Literal, TypeVar
+from typing import Optional, Any, SupportsFloat, Self, TypeAlias, Literal
 
 import gymnasium as gym
 import numpy as np
 import rustworkx as rx
 from gymnasium import spaces
 from nptyping import NDArray, Int8
+from numpy.typing import ArrayLike
 from ordered_set import OrderedSet
 from qiskit import QuantumCircuit, AncillaRegister
 from qiskit.circuit import Qubit, Operation
@@ -55,7 +55,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     action_space: spaces.Discrete
 
     initial_mapping: NDArray
-    error_rates: Optional[NDArray]
+    error_rates: NDArray
     obs_modules: list['ObsModule']
 
     routed_gates: list[tuple[Operation, tuple[Qubit, ...]]]
@@ -67,10 +67,11 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self,
         coupling_map: rx.PyGraph,
         circuit: Optional[QuantumCircuit] = None,
-        initial_mapping: Optional[NDArray] = None,
+        initial_mapping: Optional[ArrayLike] = None,
         allow_bridge_gate: bool = True,
         commutation_analysis: bool = True,
-        error_rates: Optional[NDArray] = None,
+        restrict_swaps_to_front_layer: bool = True,
+        error_rates: Optional[ArrayLike] = None,
         noise_config: Optional[NoiseConfig] = None,
         obs_modules: Optional[list['ObsModule']] = None,
     ):
@@ -91,10 +92,11 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
         self.coupling_map = coupling_map
         self.circuit = circuit
-        self.initial_mapping = initial_mapping
+        self.initial_mapping = np.array(initial_mapping, copy=False)
         self.allow_bridge_gate = allow_bridge_gate
         self.commutation_analysis = commutation_analysis
-        self.error_rates = error_rates
+        self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
+        self.error_rates = np.array(error_rates, copy=False)
         self.noise_config = noise_config
         self.obs_modules = [] if obs_modules is None else obs_modules
 
@@ -142,6 +144,14 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self._num_scheduled_2q_gates = 0
         self._scheduling_reward = 0.0
 
+        self._blocked_swap = None
+
+        # Action / observation space
+        num_actions = self.num_edges + len(self.bridge_pairs)
+        self.action_space = spaces.Discrete(num_actions)
+
+        self.observation_space = spaces.Dict(self._obs_spaces())
+
     @property
     def noise_aware(self) -> bool:
         return self.noise_config is not None
@@ -169,6 +179,70 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self._reset_state()
 
         return self.current_obs(), {}
+
+    def step(self, action: int) -> tuple[RoutingObsType, SupportsFloat, bool, bool, dict[str, Any]]:
+        if self.terminated:
+            # Environment terminated immediately and does not require routing
+            return self.current_obs(), 0.0, True, False, {}
+
+        action_is_swap = action < self.num_edges
+
+        if action_is_swap:
+            # SWAP action
+            edge = self.edge_list[action]
+            self._swap(edge)
+            reward = self._swap_reward(edge)
+        else:
+            # BRIDGE action
+            pair = self.bridge_pairs[action - self.num_edges]
+            args = self._bridge_args(pair)
+
+            if args is not None:
+                op_node, nodes = args
+
+                self._remove_op_node(op_node)
+                self._bridge(*nodes)
+                reward = self._bridge_reward(*nodes)
+            else:
+                print('Invalid BRIDGE action was selected')
+                reward = 0.0
+
+        self._update_state()
+        reward += self._scheduling_reward
+        self._blocked_swap = action if action_is_swap and self._num_scheduled_2q_gates == 0 else None
+
+        return self.current_obs(), reward, self.terminated, False, {}
+
+    def action_mask(self) -> NDArray[Literal['*'], Int8]:
+        mask = np.ones(self.action_space.n, dtype=Int8)
+
+        # Swap actions
+        if self.restrict_swaps_to_front_layer:
+            front_layer_nodes = set()
+
+            for op_node in self.dag.front_layer():
+                indices = qubits_to_indices(self.circuit, op_node.qargs)
+                nodes = (self.qubit_to_node[i] for i in indices)
+                front_layer_nodes.update(nodes)
+
+            invalid_swap_actions = [
+                i for i, edge in enumerate(self.edge_list)
+                if not front_layer_nodes.intersection(edge)
+            ]
+            mask[invalid_swap_actions] = 0
+
+        # Disallow redundant consecutive SWAPs
+        if self._blocked_swap is not None:
+            mask[self._blocked_swap] = 0
+
+        # Bridge actions
+        invalid_bridge_actions = [
+            self.num_edges + i for i, pair in enumerate(self.bridge_pairs)
+            if self._bridge_args(pair) is None
+        ]
+        mask[invalid_bridge_actions] = 0
+
+        return mask
 
     def calibrate(self, error_rates: NDArray):
         """
@@ -215,16 +289,9 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
             routed_dag.apply_operation_back(op, qargs)
         return dag_to_circuit(routed_dag)
 
-    @abstractmethod
-    def action_mask(self) -> NDArray[Literal['*'], Int8]:
-        """
-        Returns a boolean NumPy array where the ith element is true if the ith action is valid in the current state.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
     def _update_state(self):
-        raise NotImplementedError
+        gates = self._schedulable_gates()
+        self._schedule_gates(gates)
 
     def _obs_spaces(self) -> dict[str, spaces.Space]:
         return {
@@ -351,110 +418,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self._update_state()
 
 
-class SequentialRoutingEnv(RoutingEnv):
-    """
-    Sequential routing environment, where SWAP and BRIDGE operations are iteratively added to the routed circuit.
-
-    :param restrict_swaps_to_front_layer: Restrict SWAP operations to edges involving qubits that are part of two-qubit
-        operations in the front (first) layer of the original circuit.
-    """
-
-    _blocked_swap: Optional[int]
-
-    def __init__(
-        self,
-        coupling_map: rx.PyGraph,
-        circuit: Optional[QuantumCircuit] = None,
-        initial_mapping: Optional[NDArray] = None,
-        allow_bridge_gate: bool = True,
-        commutation_analysis: bool = True,
-        error_rates: Optional[NDArray] = None,
-        noise_config: Optional[NoiseConfig] = None,
-        obs_modules: Optional[list['ObsModule']] = None,
-        restrict_swaps_to_front_layer: bool = True,
-    ):
-        super().__init__(coupling_map, circuit, initial_mapping, allow_bridge_gate, commutation_analysis,
-                         error_rates, noise_config, obs_modules)
-
-        self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
-
-        self._blocked_swap = None
-
-        num_actions = self.num_edges + len(self.bridge_pairs)
-        self.action_space = spaces.Discrete(num_actions)
-
-        self.observation_space = spaces.Dict(self._obs_spaces())
-
-    def step(self, action: int) -> tuple[RoutingObsType, SupportsFloat, bool, bool, dict[str, Any]]:
-        if self.terminated:
-            # Environment terminated immediately and does not require routing
-            return self.current_obs(), 0.0, True, False, {}
-
-        action_is_swap = action < self.num_edges
-
-        if action_is_swap:
-            # SWAP action
-            edge = self.edge_list[action]
-            self._swap(edge)
-            reward = self._swap_reward(edge)
-        else:
-            # BRIDGE action
-            pair = self.bridge_pairs[action - self.num_edges]
-            args = self._bridge_args(pair)
-
-            if args is not None:
-                op_node, nodes = args
-
-                self._remove_op_node(op_node)
-                self._bridge(*nodes)
-                reward = self._bridge_reward(*nodes)
-            else:
-                print('Invalid BRIDGE action was selected')
-                reward = 0.0
-
-        self._update_state()
-        reward += self._scheduling_reward
-        self._blocked_swap = action if action_is_swap and self._num_scheduled_2q_gates == 0 else None
-
-        return self.current_obs(), reward, self.terminated, False, {}
-
-    def action_mask(self) -> NDArray[Literal['*'], Int8]:
-        mask = np.ones(self.action_space.n, dtype=Int8)
-
-        # Swap actions
-        if self.restrict_swaps_to_front_layer:
-            front_layer_nodes = set()
-
-            for op_node in self.dag.front_layer():
-                indices = qubits_to_indices(self.circuit, op_node.qargs)
-                nodes = (self.qubit_to_node[i] for i in indices)
-                front_layer_nodes.update(nodes)
-
-            invalid_swap_actions = [
-                i for i, edge in enumerate(self.edge_list)
-                if not front_layer_nodes.intersection(edge)
-            ]
-            mask[invalid_swap_actions] = 0
-
-        # Disallow redundant consecutive SWAPs
-        if self._blocked_swap is not None:
-            mask[self._blocked_swap] = 0
-
-        # Bridge actions
-        invalid_bridge_actions = [
-            self.num_edges + i for i, pair in enumerate(self.bridge_pairs)
-            if self._bridge_args(pair) is None
-        ]
-        mask[invalid_bridge_actions] = 0
-
-        return mask
-
-    def _update_state(self):
-        gates = self._schedulable_gates()
-        self._schedule_gates(gates)
-
-
-class CircuitMatrixRoutingEnv(SequentialRoutingEnv):
+class CircuitMatrixRoutingEnv(RoutingEnv):
     """
     Environment using circuit representations from `Optimizing quantum circuit placement via machine learning
     <https://dl.acm.org/doi/10.1145/3489517.3530403>`_. The circuit observation consists of a matrix where each row
@@ -470,189 +434,79 @@ class CircuitMatrixRoutingEnv(SequentialRoutingEnv):
         coupling_map: rx.PyGraph,
         depth: int,
         circuit: Optional[QuantumCircuit] = None,
-        initial_mapping: Optional[NDArray] = None,
+        initial_mapping: Optional[ArrayLike] = None,
         allow_bridge_gate: bool = True,
         commutation_analysis: bool = True,
-        error_rates: Optional[NDArray] = None,
-        noise_config: Optional[NoiseConfig] = None,
         restrict_swaps_to_front_layer: bool = True,
+        error_rates: Optional[ArrayLike] = None,
+        noise_config: Optional[NoiseConfig] = None,
     ):
-        super().__init__(coupling_map, circuit, initial_mapping, allow_bridge_gate, commutation_analysis, error_rates,
-                         noise_config, [CircuitMatrix(depth)], restrict_swaps_to_front_layer)
+        super().__init__(
+            coupling_map,
+            circuit=circuit,
+            initial_mapping=initial_mapping,
+            allow_bridge_gate=allow_bridge_gate,
+            restrict_swaps_to_front_layer=restrict_swaps_to_front_layer,
+            commutation_analysis=commutation_analysis,
+            error_rates=error_rates,
+            noise_config=noise_config,
+            obs_modules=[CircuitMatrix(depth)],
+        )
 
 
-class SchedulingMap(MutableMapping[int, int]):
-    _map: dict[int, int]
-
-    def __init__(self):
-        self._map = {}
-
-    def __setitem__(self, k: int, v: int):
-        if v == 0:
-            if k in self._map:
-                del self._map[k]
-        else:
-            self._map.__setitem__(k, v)
-
-    def __delitem__(self, k: int):
-        self._map.__delitem__(k)
-
-    def __getitem__(self, k: int) -> int:
-        return self._map.__getitem__(k)
-
-    def __len__(self) -> int:
-        return self._map.__len__()
-
-    def __iter__(self) -> Iterator[int]:
-        return self._map.__iter__()
-
-    def __repr__(self):
-        return f'<{self.__class__.__name__}: {self._map}>'
-
-    def decrement(self):
-        for k in list(self._map):
-            self[k] -= 1
-
-    def update_all(self, keys: Iterable[int], value: int = 1):
-        self.update((k, value) for k in keys)
-
-    def copy(self) -> Self:
-        return copy.deepcopy(self)
-
-
-class LayeredRoutingEnv(RoutingEnv):
+class RoutingEnvCreator:
     def __init__(
         self,
         coupling_map: rx.PyGraph,
         circuit: Optional[QuantumCircuit] = None,
-        initial_mapping: Optional[NDArray] = None,
+        initial_mapping: Optional[ArrayLike] = None,
         allow_bridge_gate: bool = True,
         commutation_analysis: bool = True,
-        error_rates: Optional[NDArray] = None,
+        restrict_swaps_to_front_layer: bool = True,
+        error_rates: Optional[ArrayLike] = None,
         noise_config: Optional[NoiseConfig] = None,
         obs_modules: Optional[list['ObsModule']] = None,
-        use_decomposed_actions: bool = False,
     ):
-        super().__init__(coupling_map, circuit, initial_mapping, allow_bridge_gate, commutation_analysis, error_rates,
-                         noise_config, obs_modules)
+        self.coupling_map = coupling_map
+        self.circuit = circuit
+        self.initial_mapping = initial_mapping
+        self.allow_bridge_gate = allow_bridge_gate
+        self.commutation_analysis = commutation_analysis
+        self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
+        self.error_rates = error_rates
+        self.noise_config = noise_config
+        self.obs_modules = obs_modules
 
-        self.use_decomposed_actions = use_decomposed_actions
-        self.scheduling_map = SchedulingMap()
-
-        # Account for COMMIT / FINISH action in addition to SWAP and BRIDGE gates
-        num_actions = self.num_edges + len(self.bridge_pairs) + 1
-        self.action_space = spaces.Discrete(num_actions)
-
-        self.observation_space = spaces.Dict(self._obs_spaces())
-
-    def step(self, action: int) -> tuple[RoutingObsType, SupportsFloat, bool, bool, dict[str, Any]]:
-        if action < self.num_edges:
-            # SWAP action
-            edge = self.edge_list[action]
-
-            self._swap(edge)
-            reward = self._swap_reward(edge)
-        elif action < self.num_edges + len(self.bridge_pairs):
-            # BRIDGE action
-            pair = self.bridge_pairs[action - self.num_edges]
-            op_node, nodes = self._bridge_args(pair)
-
-            self._remove_op_node(op_node)
-            self._bridge(*nodes)
-            reward = self._bridge_reward(*nodes)
-        else:
-            # COMMIT action
-            self._update_state()
-            reward = self._scheduling_reward
-
-        return self.current_obs(), reward, self.terminated, False, {}
-
-    def action_mask(self) -> NDArray[Literal['*'], Int8]:
-        mask = np.ones(self.action_space.n, dtype=Int8)
-
-        # Swap actions
-        invalid_swap_actions = [
-            i for i, edge in enumerate(self.edge_list)
-            if self.scheduling_map.keys() & edge
-        ]
-
-        mask[invalid_swap_actions] = 0
-
-        # Bridge actions
-        invalid_bridge_actions = []
-        for i, pair in enumerate(self.bridge_pairs):
-            args = self._bridge_args(pair)
-            if args is None or self.scheduling_map.keys() & args[1]:
-                invalid_bridge_actions.append(self.num_edges + i)
-
-        mask[invalid_bridge_actions] = 0
-
-        # Cannot COMMIT an empty layer
-        if not self.scheduling_map:
-            mask[-1] = 0
-
-        return mask
-
-    def copy(self) -> Self:
-        env = super().copy()
-        env.scheduling_map = self.scheduling_map.copy()
-        return env
-
-    def _bridge(self, control: int, middle: int, target: int):
-        super()._bridge(control, middle, target)
-        self.scheduling_map.update_all((control, middle, target))
-
-    def _swap(self, edge: tuple[int, int]):
-        super()._swap(edge)
-        self.scheduling_map.update_all(edge)
-
-    def _schedule_gates(self, gates: GateSchedulingList):
-        super()._schedule_gates(gates)
-        self.scheduling_map.update_all(itertools.chain(*(nodes for _, nodes in gates)))
-
-    def _schedulable_gates(self, only_front_layer: bool = False) -> GateSchedulingList:
-        gates = super()._schedulable_gates(only_front_layer)
-        return [(op_node, nodes) for (op_node, nodes) in gates if not self.scheduling_map.keys() & nodes]
-
-    def _reset_state(self):
-        self.scheduling_map.clear()
-        super()._reset_state()
-
-    def _update_state(self):
-        self.scheduling_map.decrement()
-
-        gates = self._schedulable_gates(only_front_layer=True)
-        self._schedule_gates(gates)
+    def create(self) -> RoutingEnv:
+        return RoutingEnv(
+            self.coupling_map,
+            circuit=self.circuit,
+            initial_mapping=self.initial_mapping,
+            allow_bridge_gate=self.allow_bridge_gate,
+            restrict_swaps_to_front_layer=self.restrict_swaps_to_front_layer,
+            commutation_analysis=self.commutation_analysis,
+            error_rates=self.error_rates,
+            noise_config=self.noise_config,
+            obs_modules=self.obs_modules,
+        )
 
 
-_RoutingEnvType = TypeVar('_RoutingEnvType', bound=RoutingEnv)
-
-
-class RoutingEnvCreator(Generic[_RoutingEnvType]):
-    def __init__(self, env_class: type[_RoutingEnvType], **kwargs):
-        self.env_class = env_class
-        self.kwargs = kwargs
-
-    def create(self) -> _RoutingEnvType:
-        return self.env_class(**self.kwargs)
-
-
-class ObsModule(ABC, Generic[_RoutingEnvType]):
+class ObsModule(ABC):
     @staticmethod
     @abstractmethod
     def key() -> str:
         raise NotImplementedError
 
     @abstractmethod
-    def space(self, env: _RoutingEnvType) -> spaces.Box:
+    def space(self, env: RoutingEnv) -> spaces.Box:
         raise NotImplementedError
 
     @abstractmethod
-    def obs(self, env: _RoutingEnvType) -> NDArray:
+    def obs(self, env: RoutingEnv) -> NDArray:
         raise NotImplementedError
 
 
-class LogReliabilities(ObsModule[RoutingEnv]):
+class LogReliabilities(ObsModule):
     @staticmethod
     def key() -> str:
         return 'log_reliabilities'
@@ -664,7 +518,7 @@ class LogReliabilities(ObsModule[RoutingEnv]):
         return env.log_reliabilities.copy()
 
 
-class CircuitMatrix(ObsModule[SequentialRoutingEnv]):
+class CircuitMatrix(ObsModule):
     def __init__(self, depth: int = 8):
         if depth <= 0:
             raise ValueError(f'Depth must be positive, got {depth}')
@@ -675,10 +529,10 @@ class CircuitMatrix(ObsModule[SequentialRoutingEnv]):
     def key() -> str:
         return 'circuit_matrix'
 
-    def space(self, env: SequentialRoutingEnv) -> spaces.Box:
+    def space(self, env: RoutingEnv) -> spaces.Box:
         return spaces.Box(-1, env.num_qubits - 1, (env.num_qubits, self.depth), dtype=np.int32)
 
-    def obs(self, env: SequentialRoutingEnv) -> NDArray:
+    def obs(self, env: RoutingEnv) -> NDArray:
         space = self.space(env)
         circuit = np.full(space.shape, -1, dtype=space.dtype)
 
@@ -709,7 +563,7 @@ class CircuitMatrix(ObsModule[SequentialRoutingEnv]):
         return mapped_circuit
 
 
-class QubitInteractions(ObsModule[RoutingEnv]):
+class QubitInteractions(ObsModule):
     def __init__(self, max_depth: int = 8):
         self.max_depth = max_depth
 
@@ -717,10 +571,10 @@ class QubitInteractions(ObsModule[RoutingEnv]):
     def key() -> str:
         return 'qubit_interactions'
 
-    def space(self, env: LayeredRoutingEnv) -> spaces.Box:
+    def space(self, env: RoutingEnv) -> spaces.Box:
         return spaces.Box(-1, self.max_depth, shape=(env.num_qubits * (env.num_qubits - 1) // 2,), dtype=np.int32)
 
-    def obs(self, env: LayeredRoutingEnv) -> NDArray:
+    def obs(self, env: RoutingEnv) -> NDArray:
         qubit_interactions = OrderedDict()
         for i in range(env.num_qubits):
             for j in range(i):
@@ -735,15 +589,3 @@ class QubitInteractions(ObsModule[RoutingEnv]):
                         qubit_interactions[indices] = i
 
         return np.array(list(qubit_interactions.values()))
-
-
-class LockedEdges(ObsModule[LayeredRoutingEnv]):
-    @staticmethod
-    def key() -> str:
-        return 'locked_edges'
-
-    def space(self, env: LayeredRoutingEnv) -> spaces.Box:
-        return spaces.Box(0, 4 if env.use_decomposed_actions else 1, shape=(env.num_edges,), dtype=np.int32)
-
-    def obs(self, env: LayeredRoutingEnv) -> NDArray:
-        return np.array([max(env.scheduling_map.get(q, 0) for q in edge) for edge in env.edge_list])

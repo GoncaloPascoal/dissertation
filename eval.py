@@ -48,7 +48,7 @@ def main():
     eval_env = EvaluationWrapper(CircuitMatrixRoutingEnv(g, depth=args.depth, noise_config=NoiseConfig()),
                                  circuit_generator, noise_generator=noise_generator, evaluation_iters=args.iters)
     env = eval_env.env
-    initial_layout = env.qubit_to_node.copy().tolist()
+    initial_layout = env.qubit_to_node.tolist()
 
     reliability_map = {}
     for edge, value in zip(env.coupling_map.edge_list(), env.error_rates):  # type: ignore
