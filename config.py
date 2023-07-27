@@ -5,11 +5,13 @@ from typing import Any, Final
 
 import rustworkx as rx
 import yaml
+from ray.rllib import Policy
 
-from routing.circuit_gen import CircuitGenerator, RandomCircuitGenerator, LayeredCircuitGenerator
+from routing.circuit_gen import CircuitGenerator, RandomCircuitGenerator, LayeredCircuitGenerator, \
+    DatasetCircuitGenerator
 from routing.env import RoutingEnvCreator, CircuitMatrix, ObsModule
 from routing.noise import NoiseConfig, UniformNoiseGenerator, NoiseGenerator
-from routing.orchestration import TrainingOrchestrator
+from routing.orchestration import TrainingOrchestrator, EvaluationOrchestrator
 from routing.topology import t_topology, h_topology, grid_topology, linear_topology
 
 
@@ -24,12 +26,13 @@ COUPLING_MAPS: Final[dict[str, Callable[..., rx.PyGraph]]] = {
     'linear': linear_topology,
 }
 
-CIRCUIT_GENERATORS: Final[dict[str, type[CircuitGenerator]]] = {
+CIRCUIT_GENERATORS: Final[dict[str, Callable[..., CircuitGenerator]]] = {
     'random': RandomCircuitGenerator,
     'layered': LayeredCircuitGenerator,
+    'dataset': DatasetCircuitGenerator.from_dir,
 }
 
-NOISE_GENERATORS: Final[dict[str, type[NoiseGenerator]]] = {
+NOISE_GENERATORS: Final[dict[str, Callable[..., NoiseGenerator]]] = {
     'uniform': UniformNoiseGenerator,
 }
 
@@ -37,7 +40,6 @@ NOISE_GENERATORS: Final[dict[str, type[NoiseGenerator]]] = {
 def parse_yaml(path: str) -> dict[str, Any]:
     with open(path, 'r') as f:
         return yaml.safe_load(f)
-
 
 def parse_env_config(path: str) -> RoutingEnvCreator:
     config = parse_yaml(path)
@@ -73,17 +75,19 @@ def parse_env_config(path: str) -> RoutingEnvCreator:
         **config.get('args', {})
     )
 
+
+def _parse_circuit_generator_config(config: dict[str, Any]):
+    return CIRCUIT_GENERATORS[config['type']](**config['args'])
+
+def _parse_noise_generator_config(config: dict[str, Any]):
+    return NOISE_GENERATORS[config['type']](**config['args'])
+
 def parse_train_config(env_path: str, train_path: str) -> TrainingOrchestrator:
     env_creator = parse_env_config(env_path)
     config = parse_yaml(train_path)
 
-    cg_config: dict[str, Any] = config['circuit_generator']
-    cg_type, cg_args = cg_config['type'], cg_config['args']
-    circuit_generator = CIRCUIT_GENERATORS[cg_type](**cg_args)
-
-    ng_config: dict[str, Any] = config['noise_generator']
-    ng_type, ng_args = ng_config['type'], ng_config['args']
-    noise_generator = NOISE_GENERATORS[ng_type](**ng_args)
+    circuit_generator = _parse_circuit_generator_config(config['circuit_generator'])
+    noise_generator = _parse_noise_generator_config(config['noise_generator'])
 
     return TrainingOrchestrator(
         env_creator,
@@ -93,10 +97,21 @@ def parse_train_config(env_path: str, train_path: str) -> TrainingOrchestrator:
     )
 
 def parse_eval_config(env_path: str, eval_path: str):
-    env_creator = parse_env_config(env_path)
+    env = parse_env_config(env_path).create()
     config = parse_yaml(eval_path)
 
-    # TODO
+    policy = Policy.from_checkpoint(config['checkpoint_path'])['default_policy']
+
+    circuit_generator = _parse_circuit_generator_config(config['circuit_generator'])
+    noise_generator = _parse_noise_generator_config(config['noise_generator'])
+
+    return EvaluationOrchestrator(
+        policy,
+        env,
+        circuit_generator,
+        noise_generator=noise_generator,
+        **config.get('args', {})
+    )
 
 
 def main():
@@ -106,7 +121,8 @@ def main():
 
     args = parser.parse_args()
 
-    orchestrator = parse_train_config(args.env_config, args.train_config)
+    orchestrator = parse_eval_config(args.env_config, args.train_config)
+    orchestrator.evaluate()
 
 
 if __name__ == '__main__':

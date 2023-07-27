@@ -1,8 +1,15 @@
+import time
+from collections.abc import Sequence, Collection, Set
+from math import inf
+from numbers import Real
+from typing import Any, ClassVar, Optional, Self, cast
 
-from collections.abc import Sequence, Collection
-from typing import Any, ClassVar, Optional, Self
-
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+from qiskit import QuantumCircuit, transpile
 from qiskit.transpiler import CouplingMap
+from ray.rllib import Policy
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.tune import register_env
 from tqdm.rich import tqdm
@@ -95,26 +102,31 @@ class TrainingOrchestrator:
 
 class EvaluationOrchestrator:
     reliability_map: dict[tuple[int, int], float]
+    metrics: dict[str, dict[str, list[Real]]]
 
     def __init__(
         self,
-        algorithm: PPO,
+        policy: Policy,
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
         *,
         noise_generator: Optional[NoiseGenerator] = None,
-        evaluation_iters: int = 20,
-        num_episodes: Optional[int] = None,
+        evaluation_iters: int = 10,
+        num_circuits: Optional[int] = None,
         routing_methods: str | Collection[str] = 'sabre',
         use_tqdm: bool = False,
+        seed: Optional[int] = None,
     ):
-        if num_episodes is None:
+        if num_circuits is None:
             if isinstance(circuit_generator, DatasetCircuitGenerator):
-                num_episodes = len(circuit_generator.dataset)
+                num_circuits = len(circuit_generator.dataset)
             else:
-                num_episodes = 100
+                num_circuits = 100
 
-        self.algorithm = algorithm
+        if num_circuits <= 0:
+            raise ValueError(f'Number of evaluation circuits must be positive, got {num_circuits}')
+
+        self.policy = policy
         self.eval_env = EvaluationWrapper(
             env,
             circuit_generator,
@@ -122,29 +134,102 @@ class EvaluationOrchestrator:
             evaluation_iters=evaluation_iters,
         )
 
-        self.num_episodes = num_episodes
+        self.num_circuits = num_circuits
         self.routing_methods = [routing_methods] if isinstance(routing_methods, str) else list(routing_methods)
         self.use_tqdm = use_tqdm
+        self.seed = seed
 
         self.env = self.eval_env.env
         self.initial_layout = env.qubit_to_node.tolist()
         self.qiskit_coupling_map = CouplingMap(env.coupling_map.to_directed().edge_list())
 
         self.reliability_map = {}
-        for edge, error_rate in zip(env.coupling_map, env.error_rates):  # type: ignore
+        for edge, error_rate in zip(env.coupling_map.edge_list(), env.error_rates):  # type: ignore
             reliability = 1.0 - error_rate
             self.reliability_map[edge] = reliability
             self.reliability_map[edge[::-1]] = reliability
 
-        self.reset_metrics()
+        self.metrics = {}
 
-    def reset_metrics(self):
-        raise NotImplementedError
+    def log_metric(self, method: str, metric: str, value: Real):
+        self.metrics.setdefault(method, {}).setdefault(metric, []).append(value)
+
+    def log_circuit_metrics(
+        self,
+        method: str,
+        original_circuit: QuantumCircuit,
+        routed_circuit: QuantumCircuit,
+        *,
+        exclude: Optional[Set[str]] = None,
+    ):
+        exclude = set() if exclude is None else exclude
+        routed_ops = cast(dict[str, int], routed_circuit.count_ops())
+
+        def log_metric_checked(metric: str, value: Real):
+            if metric not in exclude:
+                self.log_metric(method, metric, value)
+
+        for gate in ['swap', 'bridge']:
+            log_metric_checked(f'{gate}_count', routed_ops.get(gate, 0))
+
+        routed_circuit = routed_circuit.decompose(['swap', 'bridge'])
+
+        original_cnot_count = original_circuit.count_ops().get('cx', 0)
+        cnot_count = routed_circuit.count_ops().get('cx', 0)
+
+        log_metric_checked('cnot_count', cnot_count)
+        log_metric_checked('added_cnot_count', cnot_count - original_cnot_count)
+        log_metric_checked('depth', routed_circuit.depth())
 
     def evaluate(self):
-        iterable = range(self.num_episodes)
+        iterable = range(self.num_circuits)
         if self.use_tqdm:
             iterable = tqdm(iterable)
 
         for _ in iterable:
-            pass
+            start_time = time.perf_counter()
+            best_reward = -inf
+            routed_circuit = self.env.circuit.copy_empty_like()
+
+            for _ in range(self.eval_env.evaluation_iters):
+                obs, _ = self.eval_env.reset()
+                terminated = False
+                total_reward = 0.0
+
+                while not terminated:
+                    action, *_ = self.policy.compute_single_action(obs)
+                    obs, reward, terminated, *_ = self.eval_env.step(action)
+                    total_reward += reward
+
+                if total_reward > best_reward:
+                    best_reward = total_reward
+                    routed_circuit = self.env.routed_circuit()
+            self.log_metric('rl', 'routing_time', time.perf_counter() - start_time)
+
+            original_circuit = self.env.circuit
+            self.log_circuit_metrics('rl', original_circuit, routed_circuit)
+
+            for method in self.routing_methods:
+                start_time = time.perf_counter()
+                routed_circuit = transpile(
+                    original_circuit,
+                    coupling_map=self.qiskit_coupling_map,
+                    initial_layout=self.initial_layout,
+                    routing_method=method,
+                    optimization_level=0,
+                    seed_transpiler=self.seed,
+                )
+                self.log_metric(method, 'routing_time', time.perf_counter() - start_time)
+
+                self.log_circuit_metrics(method, original_circuit, routed_circuit, exclude={'bridge_count'})
+
+    def metric_as_df(self, metric: str) -> pd.DataFrame:
+        return pd.DataFrame({method: method_data.get(metric, []) for method, method_data in self.metrics.items()})
+
+    def box_plot(self, metric: str):
+        sns.boxplot(self.metric_as_df(metric))
+        plt.show()
+
+    def kde_plot(self, metric: str):
+        sns.kdeplot(self.metric_as_df(metric))
+        plt.show()

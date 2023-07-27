@@ -137,7 +137,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
             bridge_circuit.cx(1, 2)
             bridge_circuit.cx(0, 1)
 
-        self.bridge_gate = bridge_circuit.to_gate(label='BRIDGE')
+        self.bridge_gate = bridge_circuit.to_gate(label='bridge')
         self.bridge_gate.name = 'bridge'
         self.swap_gate = SwapGate()
 
