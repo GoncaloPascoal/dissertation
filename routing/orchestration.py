@@ -19,10 +19,13 @@ from routing.circuit_gen import CircuitGenerator, DatasetCircuitGenerator
 from routing.env import RoutingEnvCreator, RoutingEnv
 from routing.env_wrapper import TrainingWrapper, EvaluationWrapper
 from routing.noise import NoiseGenerator
+from utils import reliability
 
 
 class TrainingOrchestrator:
     ENV_NAME: ClassVar[str] = 'RoutingEnv'
+
+    algorithm: PPO
 
     def __init__(
         self,
@@ -180,6 +183,7 @@ class EvaluationOrchestrator:
         log_metric_checked('cnot_count', cnot_count)
         log_metric_checked('added_cnot_count', cnot_count - original_cnot_count)
         log_metric_checked('depth', routed_circuit.depth())
+        log_metric_checked('reliability', reliability(routed_circuit, self.reliability_map))
 
     def evaluate(self):
         iterable = range(self.num_circuits)
