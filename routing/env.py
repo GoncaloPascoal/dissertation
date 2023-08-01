@@ -1,6 +1,5 @@
 
 import copy
-import itertools
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from typing import Optional, Any, SupportsFloat, Self, TypeAlias, Literal
@@ -13,7 +12,7 @@ from nptyping import NDArray, Int8
 from numpy.typing import ArrayLike
 from ordered_set import OrderedSet
 from qiskit import QuantumCircuit, AncillaRegister
-from qiskit.circuit import Qubit, Operation
+from qiskit.circuit import Operation
 from qiskit.circuit.library import SwapGate, CXGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGOpNode
@@ -58,10 +57,12 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
     error_rates: NDArray
     obs_modules: list['ObsModule']
 
-    routed_gates: list[tuple[Operation, tuple[Qubit, ...]]]
+    routed_gates: list[tuple[Operation, tuple[int, ...]]]
     routed_op_nodes: set[DAGOpNode]
     log_reliabilities: NDArray
     edge_to_log_reliability: dict[tuple[int, int], float]
+
+    pair_to_bridge_args: dict[tuple[int, int], BridgeArgs]
 
     def __init__(
         self,
@@ -141,6 +142,8 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.bridge_gate.name = 'bridge'
         self.swap_gate = SwapGate()
 
+        self.pair_to_bridge_args = {}
+
         self._num_scheduled_2q_gates = 0
         self._scheduling_reward = 0.0
 
@@ -195,7 +198,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         else:
             # BRIDGE action
             pair = self.bridge_pairs[action - self.num_edges]
-            args = self._bridge_args(pair)
+            args = self.pair_to_bridge_args.get(pair)
 
             if args is not None:
                 op_node, nodes = args
@@ -215,12 +218,13 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
     def action_mask(self) -> NDArray[Literal['*'], Int8]:
         mask = np.ones(self.action_space.n, dtype=Int8)
+        front_layer = self.dag.front_layer()
 
         # Swap actions
         if self.restrict_swaps_to_front_layer:
             front_layer_nodes = set()
 
-            for op_node in self.dag.front_layer():
+            for op_node in front_layer:
                 indices = qubits_to_indices(self.circuit, op_node.qargs)
                 nodes = (self.qubit_to_node[i] for i in indices)
                 front_layer_nodes.update(nodes)
@@ -235,12 +239,30 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         if self._blocked_swap is not None:
             mask[self._blocked_swap] = 0
 
-        # Bridge actions
-        invalid_bridge_actions = [
-            self.num_edges + i for i, pair in enumerate(self.bridge_pairs)
-            if self._bridge_args(pair) is None
-        ]
-        mask[invalid_bridge_actions] = 0
+        if self.allow_bridge_gate:
+            # Compute bridge args
+            pair_to_bridge_args = {}
+
+            for op_node in front_layer:
+                if isinstance(op_node.op, CXGate):
+                    indices = qubits_to_indices(self.circuit, op_node.qargs)
+                    nodes = tuple(self.qubit_to_node[i] for i in indices)
+
+                    control, target = nodes
+                    shortest_path = self.shortest_paths[control][target]
+
+                    if len(shortest_path) == 3:
+                        pair = tuple(sorted(indices))
+                        pair_to_bridge_args[pair] = (op_node, tuple(shortest_path))
+
+            self.pair_to_bridge_args = pair_to_bridge_args    # type: ignore
+
+            # Bridge actions
+            invalid_bridge_actions = [
+                self.num_edges + i for i, pair in enumerate(self.bridge_pairs)
+                if pair not in self.pair_to_bridge_args
+            ]
+            mask[invalid_bridge_actions] = 0
 
         return mask
 
@@ -285,13 +307,12 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
     def routed_circuit(self) -> QuantumCircuit:
         routed_dag = self.dag.copy_empty_like()
-        for op, qargs in self.routed_gates:
-            routed_dag.apply_operation_back(op, qargs)
+        for op, nodes in self.routed_gates:
+            routed_dag.apply_operation_back(op, indices_to_qubits(self.circuit, nodes))
         return dag_to_circuit(routed_dag)
 
     def _update_state(self):
-        gates = self._schedulable_gates()
-        self._schedule_gates(gates)
+        self._schedule_gates(self._schedulable_gates())
 
     def _obs_spaces(self) -> dict[str, spaces.Space]:
         return {
@@ -305,8 +326,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
     def _schedule_gates(self, gates: GateSchedulingList):
         for op_node, nodes in gates:
-            qargs = indices_to_qubits(self.circuit, nodes)
-            self.routed_gates.append((op_node.op, qargs))
+            self.routed_gates.append((op_node.op, nodes))
             self._remove_op_node(op_node)
 
         self._num_scheduled_2q_gates = len(gates)
@@ -314,7 +334,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
     def _schedulable_gates(self, only_front_layer: bool = False) -> GateSchedulingList:
         gates = OrderedSet()
-        layers = [self.dag.front_layer()] if only_front_layer else dag_layers(self.dag)
+        op_nodes = self.dag.front_layer() if only_front_layer else self.dag.op_nodes()
         locked_nodes: set[int] = set()
 
         commutation_set: Optional[dict] = (
@@ -322,8 +342,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
             else None
         )
 
-        op_node: DAGOpNode
-        for op_node in itertools.chain(*layers):
+        for op_node in op_nodes:
             indices = qubits_to_indices(self.circuit, op_node.qargs)
             nodes = tuple(self.qubit_to_node[i] for i in indices)
 
@@ -359,27 +378,10 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         return valid_under_current_mapping and not_blocked
 
     def _bridge(self, control: int, middle: int, target: int):
-        indices = (control, middle, target)
-        qargs = indices_to_qubits(self.circuit, indices)
-
-        self.routed_gates.append((self.bridge_gate, qargs))
-
-    def _bridge_args(self, pair: tuple[int, int]) -> Optional[BridgeArgs]:
-        for op_node in self.dag.front_layer():
-            if isinstance(op_node.op, CXGate):
-                indices = qubits_to_indices(self.circuit, op_node.qargs)
-                nodes = tuple(self.qubit_to_node[i] for i in indices)
-
-                if tuple(sorted(nodes)) == pair:
-                    control, target = nodes
-                    return op_node, tuple(self.shortest_paths[control][target])
-
-        return None
+        self.routed_gates.append((self.bridge_gate, (control, middle, target)))
 
     def _swap(self, edge: tuple[int, int]):
-        qargs = indices_to_qubits(self.circuit, edge)
-
-        self.routed_gates.append((self.swap_gate, qargs))
+        self.routed_gates.append((self.swap_gate, edge))
 
         # Update mappings
         node_a, node_b = edge
