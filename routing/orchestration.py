@@ -16,6 +16,7 @@ from ray.tune import register_env
 from tqdm.rich import tqdm
 
 from action_mask_model import ActionMaskModel
+from routing.callbacks import RoutingCallbacks
 from routing.circuit_gen import CircuitGenerator, DatasetCircuitGenerator
 from routing.env import RoutingEnvCreator, RoutingEnv
 from routing.env_wrapper import TrainingWrapper, EvaluationWrapper
@@ -72,6 +73,7 @@ class TrainingOrchestrator:
                 grad_clip=0.5,
                 _enable_learner_api=False,
             )
+            .callbacks(RoutingCallbacks)
             .environment(env=TrainingOrchestrator.ENV_NAME)
             .fault_tolerance(
                 recreate_failed_workers=True,

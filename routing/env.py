@@ -1,7 +1,7 @@
 
 import copy
 from abc import ABC, abstractmethod
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from typing import Optional, Any, SupportsFloat, Self, TypeAlias, Literal
 
 import gymnasium as gym
@@ -74,6 +74,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         error_rates: Optional[ArrayLike] = None,
         noise_config: Optional[NoiseConfig] = None,
         obs_modules: Optional[list['ObsModule']] = None,
+        log_metrics: bool = True,
     ):
         num_qubits = coupling_map.num_nodes()
         num_edges = coupling_map.num_edges()
@@ -99,6 +100,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.error_rates = np.array(error_rates, copy=False)
         self.noise_config = noise_config
         self.obs_modules = [] if obs_modules is None else obs_modules
+        self.log_metrics = log_metrics
 
         # Computations using coupling map
         self.num_qubits = num_qubits
@@ -154,6 +156,9 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
         self.observation_space = spaces.Dict(self._obs_spaces())
 
+        # Custom metrics
+        self.numeric_metrics = defaultdict(float)
+
     @property
     def noise_aware(self) -> bool:
         return self.noise_config is not None
@@ -168,6 +173,8 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         seed: Optional[int] = None,
         options: Optional[dict[str, Any]] = None,
     ) -> tuple[RoutingObsType, dict[str, Any]]:
+        self.numeric_metrics.clear()
+
         if self.circuit.num_qubits < self.num_qubits:
             self.circuit.add_register(AncillaRegister(self.num_qubits - self.circuit.num_qubits))
 
@@ -377,9 +384,17 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         return valid_under_current_mapping and not_blocked
 
     def _bridge(self, control: int, middle: int, target: int):
+        if self.log_metrics:
+            self.numeric_metrics['added_cnot_count'] += 3
+            self.numeric_metrics['bridge_count'] += 1
+
         self.routed_gates.append((self.bridge_gate, (control, middle, target)))
 
     def _swap(self, edge: tuple[int, int]):
+        if self.log_metrics:
+            self.numeric_metrics['added_cnot_count'] += 3
+            self.numeric_metrics['swap_count'] += 1
+
         self.routed_gates.append((self.swap_gate, edge))
 
         # Update mappings
@@ -467,6 +482,7 @@ class RoutingEnvCreator:
         error_rates: Optional[ArrayLike] = None,
         noise_config: Optional[NoiseConfig] = None,
         obs_modules: Optional[list['ObsModule']] = None,
+        log_metrics: bool = True,
     ):
         self.coupling_map = coupling_map
         self.circuit = circuit
@@ -477,6 +493,7 @@ class RoutingEnvCreator:
         self.error_rates = error_rates
         self.noise_config = noise_config
         self.obs_modules = obs_modules
+        self.log_metrics = log_metrics
 
     def create(self) -> RoutingEnv:
         return RoutingEnv(
@@ -489,6 +506,7 @@ class RoutingEnvCreator:
             error_rates=self.error_rates,
             noise_config=self.noise_config,
             obs_modules=self.obs_modules,
+            log_metrics=self.log_metrics,
         )
 
 
