@@ -1,11 +1,9 @@
 
-from typing import List
-
 from qiskit.circuit import Gate
 from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 
 
-def dag_layers(dag: DAGCircuit) -> List[List[DAGOpNode]]:
+def dag_layers(dag: DAGCircuit) -> list[list[DAGOpNode]]:
     graph_layers = dag.multigraph_layers()
     try:
         next(graph_layers)  # Remove input nodes

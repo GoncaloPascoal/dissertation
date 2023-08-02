@@ -7,7 +7,7 @@ import numpy as np
 from nptyping import NDArray
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class NoiseConfig:
     """
     Configuration values for controlling rewards in noise-aware routing environments.
@@ -50,6 +50,9 @@ class NoiseGenerator(ABC):
     """
 
     def __init__(self, *, recalibration_interval: int = 16):
+        if recalibration_interval <= 0:
+            raise ValueError(f'Recalibration interval must be positive, got {recalibration_interval}')
+
         self.recalibration_interval = recalibration_interval
 
     @abstractmethod
@@ -57,7 +60,6 @@ class NoiseGenerator(ABC):
         raise NotImplementedError
 
 
-@dataclass
 class UniformNoiseGenerator(NoiseGenerator):
     """
     Generates gate error rates according to a normal distribution (clamped between 0 and 1).
@@ -68,6 +70,12 @@ class UniformNoiseGenerator(NoiseGenerator):
     mean: float
     std: float
     recalibration_interval: int = field(default=16, kw_only=True)
+
+    def __init__(self, mean: float, std: float, *, recalibration_interval: int = 16):
+        super().__init__(recalibration_interval=recalibration_interval)
+
+        self.mean = mean
+        self.std = std
 
     def generate_error_rates(self, n: int) -> NDArray:
         return np.random.normal(self.mean, self.std, n).clip(0.0, 1.0)

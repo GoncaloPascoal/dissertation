@@ -1,17 +1,17 @@
 
 import functools
 import operator
-from typing import Tuple, Iterable
+from typing import Iterable
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import Qubit
 
 
-def qubits_to_indices(qc: QuantumCircuit, qubits: Iterable[Qubit]) -> Tuple[int, ...]:
+def qubits_to_indices(qc: QuantumCircuit, qubits: Iterable[Qubit]) -> tuple[int, ...]:
     return tuple(qc.find_bit(q).index for q in qubits)  # type: ignore
 
 
-def indices_to_qubits(qc: QuantumCircuit, indices: Iterable[int]) -> Tuple[Qubit, ...]:
+def indices_to_qubits(qc: QuantumCircuit, indices: Iterable[int]) -> tuple[Qubit, ...]:
     return tuple(qc.qubits[i] for i in indices)
 
 

@@ -1,3 +1,4 @@
+
 import time
 from collections.abc import Sequence, Collection, Set
 from math import inf
@@ -148,9 +149,9 @@ class EvaluationOrchestrator:
 
         self.reliability_map = {}
         for edge, error_rate in zip(env.coupling_map.edge_list(), env.error_rates):  # type: ignore
-            reliability = 1.0 - error_rate
-            self.reliability_map[edge] = reliability
-            self.reliability_map[edge[::-1]] = reliability
+            edge_reliability = 1.0 - error_rate
+            self.reliability_map[edge] = edge_reliability
+            self.reliability_map[edge[::-1]] = edge_reliability
 
         self.metrics = {}
 
