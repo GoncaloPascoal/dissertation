@@ -18,9 +18,8 @@ from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGOpNode
 from qiskit.transpiler.passes import CommutationAnalysis
 
-from dag_utils import dag_layers
 from routing.noise import NoiseConfig
-from utils import qubits_to_indices, indices_to_qubits
+from utils import qubits_to_indices, indices_to_qubits, dag_layers
 
 RoutingObsType: TypeAlias = dict[str, NDArray]
 GateSchedulingList: TypeAlias = list[tuple[DAGOpNode, tuple[int, ...]]]
