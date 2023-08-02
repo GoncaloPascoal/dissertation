@@ -1,7 +1,6 @@
 
-from argparse import ArgumentParser
 from collections.abc import Callable
-from typing import Any, Final
+from typing import Any, Final, Optional
 
 import rustworkx as rx
 import yaml
@@ -13,7 +12,6 @@ from routing.env import RoutingEnvCreator, CircuitMatrix, ObsModule
 from routing.noise import NoiseConfig, UniformNoiseGenerator, NoiseGenerator
 from routing.orchestration import TrainingOrchestrator, EvaluationOrchestrator
 from routing.topology import t_topology, h_topology, grid_topology, linear_topology
-
 
 OBS_MODULES: Final[dict[str, type[ObsModule]]] = {
     'circuit_matrix': CircuitMatrix,
@@ -76,54 +74,53 @@ def parse_env_config(path: str) -> RoutingEnvCreator:
     )
 
 
-def _parse_circuit_generator_config(config: dict[str, Any]):
+def _parse_circuit_generator_config(config: dict[str, Any]) -> CircuitGenerator:
     return CIRCUIT_GENERATORS[config['type']](**config['args'])
 
-def _parse_noise_generator_config(config: dict[str, Any]):
+def _parse_noise_generator_config(config: dict[str, Any]) -> NoiseGenerator:
     return NOISE_GENERATORS[config['type']](**config['args'])
 
-def parse_train_config(env_path: str, train_path: str) -> TrainingOrchestrator:
+def parse_train_config(
+    env_path: str,
+    train_path: str,
+    override_args: Optional[dict[str, Any]] = None,
+) -> TrainingOrchestrator:
     env_creator = parse_env_config(env_path)
     config = parse_yaml(train_path)
 
-    circuit_generator = _parse_circuit_generator_config(config['circuit_generator'])
-    noise_generator = _parse_noise_generator_config(config['noise_generator'])
+    circuit_generator = _parse_circuit_generator_config(config.pop('circuit_generator'))
+    noise_generator = _parse_noise_generator_config(config.pop('noise_generator'))
 
-    return TrainingOrchestrator(
-        env_creator,
-        circuit_generator,
+    args = dict(
+        env_creator=env_creator,
+        circuit_generator=circuit_generator,
         noise_generator=noise_generator,
-        **config.get('args', {}),
+        **config,
     )
+    args.update(override_args)
 
-def parse_eval_config(env_path: str, eval_path: str):
+    return TrainingOrchestrator(**args)
+
+def parse_eval_config(env_path: str, eval_path: str, override_args: Optional[dict[str, Any]] = None):
+    if override_args is None:
+        override_args = {}
+
     env = parse_env_config(env_path).create()
     config = parse_yaml(eval_path)
 
-    policy = Policy.from_checkpoint(config['checkpoint_path'])['default_policy']
+    checkpoint_path = config.pop('checkpoint_path', None) or override_args['checkpoint_path']
+    policy = Policy.from_checkpoint(checkpoint_path)['default_policy']
 
-    circuit_generator = _parse_circuit_generator_config(config['circuit_generator'])
-    noise_generator = _parse_noise_generator_config(config['noise_generator'])
+    circuit_generator = _parse_circuit_generator_config(config.pop('circuit_generator'))
+    noise_generator = _parse_noise_generator_config(config.pop('noise_generator'))
 
-    return EvaluationOrchestrator(
-        policy,
-        env,
-        circuit_generator,
+    args = dict(
+        policy=policy,
+        env=env,
+        circuit_generator=circuit_generator,
         noise_generator=noise_generator,
-        **config.get('args', {})
+        **config,
     )
+    args.update(override_args)
 
-
-def main():
-    parser = ArgumentParser('yaml', description='Qubit routing with deep reinforcement learning')
-    parser.add_argument('env_config', help='path to environment configuration file')
-    parser.add_argument('train_config', help='path to training configuration file')
-
-    args = parser.parse_args()
-
-    orchestrator = parse_eval_config(args.env_config, args.train_config)
-    orchestrator.evaluate()
-
-
-if __name__ == '__main__':
-    main()
+    return EvaluationOrchestrator(**args)

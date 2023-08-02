@@ -1,17 +1,14 @@
 
+import argparse
 from argparse import ArgumentParser
 from typing import Any
 
 import gymnasium as gym
-from ray.rllib.algorithms.ppo import PPOConfig
-from ray.tune import register_env
 
-from action_mask_model import ActionMaskModel
-from routing.circuit_gen import RandomCircuitGenerator
+from parsing import parse_train_config
 from routing.env import CircuitMatrixRoutingEnv
 from routing.env_wrapper import TrainingWrapper
-from routing.noise import NoiseConfig, UniformNoiseGenerator
-from routing.topology import t_topology
+from routing.noise import NoiseConfig
 
 
 def env_creator(env_config: dict[str, Any]) -> gym.Env:
@@ -27,85 +24,29 @@ def main():
     parser = ArgumentParser('train', description='Noise-Resilient Reinforcement Learning Strategies for Quantum '
                                                  'Compiling (model training script)')
 
-    parser.add_argument('-m', '--model', metavar='M', help='model name', required=True)
-    parser.add_argument('-d', '--depth', metavar='N', type=int, default=8, help='depth of circuit observations')
-    parser.add_argument('-g', '--num-gpus', metavar='N', type=float, default=0.0,
+    parser.add_argument('env_config', help='environment configuration file')
+    parser.add_argument('train_config', help='training configuration file')
+
+    parser.add_argument('-m', '--model-dir', metavar='M', help='directory to save the model', required=True)
+    parser.add_argument('-i', '--iters', metavar='N', type=int, help='training iterations', required=True)
+    parser.add_argument('-g', '--num-gpus', metavar='N', type=float, default=argparse.SUPPRESS,
                         help='number of GPUs used for training (PPO has multi-GPU support), can be fractional')
-    parser.add_argument('-w', '--workers', metavar='N', type=int, default=2, help='number of rollout workers')
-    parser.add_argument('-e', '--envs-per-worker', metavar='N', type=int, default=4,
+    parser.add_argument('-w', '--num-workers', metavar='N', type=int, default=argparse.SUPPRESS,
+                        help='number of rollout workers')
+    parser.add_argument('-e', '--envs-per-worker', metavar='N', type=int, default=argparse.SUPPRESS,
                         help='number of environments per rollout worker')
-    parser.add_argument('-i', '--iters', metavar='N', type=int, default=100, help='training iterations')
-    parser.add_argument('--circuit-size', metavar='N', type=int, default=64, help='random circuit gate count')
-    parser.add_argument('--episodes-per-circuit', metavar='N', type=int, default=1,
-                        help='training episodes per circuit')
-    parser.add_argument('--batch-size', metavar='N', type=int, default=8192, help='training batch size')
-    parser.add_argument('--lr', metavar='N', type=float, default=1e-4, help='learning rate')
-    parser.add_argument('--minibatch-size', metavar='N', type=int, default=128,
-                        help='stochastic gradient descent minibatch size')
-    parser.add_argument('--net-arch', metavar='N', nargs='+', type=int, default=[64, 64, 96],
-                        help='neural network architecture (number of nodes in each hidden FC layer)')
-    parser.add_argument('--sgd-iters', metavar='N', type=int, default=10,
-                        help='stochastic gradient descent iterations per batch')
 
-    args = parser.parse_args()
+    args = vars(parser.parse_args())
 
-    register_env('CircuitMatrixRoutingEnv', env_creator)
+    env_config = args.pop('env_config')
+    train_config = args.pop('train_config')
+    iters = args.pop('iters')
+    model_dir = args.pop('model_dir')
 
-    g = t_topology()
-    circuit_generator = RandomCircuitGenerator(g.num_nodes(), args.circuit_size)
-    noise_generator = UniformNoiseGenerator(1e-2, 3e-3)
+    orchestrator = parse_train_config(env_config, train_config, override_args=args)
 
-    config = (
-        PPOConfig().training(
-            clip_param=0.2,
-            lr=args.lr,
-            lambda_=0.95,
-            model={
-                'custom_model': ActionMaskModel,
-                'fcnet_hiddens': args.net_arch,
-                'fcnet_activation': 'silu',
-            },
-            num_sgd_iter=args.sgd_iters,
-            sgd_minibatch_size=args.minibatch_size,
-            train_batch_size=args.batch_size,
-            vf_loss_coeff=0.5,
-            grad_clip=0.5,
-            _enable_learner_api=False,
-        )
-        .environment(
-            env='CircuitMatrixRoutingEnv',
-            env_config={
-                'coupling_map': g,
-                'depth': args.depth,
-                'circuit_generator': circuit_generator,
-                'noise_generator': noise_generator,
-                'episodes_per_circuit': args.episodes_per_circuit,
-            }
-        )
-        .fault_tolerance(
-            recreate_failed_workers=True,
-            restart_failed_sub_environments=True,
-        )
-        .framework('torch')
-        .resources(
-            num_gpus=args.num_gpus,
-        )
-        .rl_module(
-            _enable_rl_module_api=False,
-        )
-        .rollouts(
-            batch_mode='complete_episodes',
-            num_rollout_workers=args.workers,
-            num_envs_per_worker=args.envs_per_worker,
-        )
-    )
-
-    algorithm = config.build()
-
-    for _ in range(args.iters):
-        algorithm.train()
-
-    algorithm.save(f'models/{args.model}')
+    orchestrator.train(iters)
+    orchestrator.save(model_dir)
 
 
 if __name__ == '__main__':

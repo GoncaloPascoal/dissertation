@@ -11,8 +11,7 @@ noise_generator:
     mean: 1.0e-2
     std: 3.0e-3
 
-args:
-  hidden_layers: [64, 64, 96]
-  minibatch_size: 256
-  batch_size: 8192
-  num_workers: 4
+hidden_layers: [64, 64, 96]
+minibatch_size: 256
+batch_size: 8192
+num_workers: 4

@@ -34,7 +34,7 @@ class TrainingOrchestrator:
         circuit_generator: CircuitGenerator,
         *,
         noise_generator: Optional[NoiseGenerator] = None,
-        training_iters: int = 1,
+        episodes_per_circuit: int = 1,
         lr: float = 1e-4,
         hidden_layers: Optional[Sequence[int]] = None,
         activation_fn: str = 'silu',
@@ -50,7 +50,7 @@ class TrainingOrchestrator:
 
         # TODO: maybe refactor
         def create_env(_config: dict[str, Any]) -> TrainingWrapper:
-            return TrainingWrapper(env_creator.create(), circuit_generator, noise_generator, training_iters)
+            return TrainingWrapper(env_creator.create(), circuit_generator, noise_generator, episodes_per_circuit)
 
         register_env(TrainingOrchestrator.ENV_NAME, create_env)
 

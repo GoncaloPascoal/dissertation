@@ -13,6 +13,5 @@ noise_generator:
     mean: 1.0e-2
     std: 3.0e-3
 
-args:
-  num_circuits: 50
-  use_tqdm: true
+num_circuits: 50
+use_tqdm: true
