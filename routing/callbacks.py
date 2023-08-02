@@ -1,6 +1,7 @@
 from collections import defaultdict
 from typing import Optional
 
+import numpy as np
 from ray.rllib import BaseEnv, RolloutWorker, Policy
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.evaluation.episode_v2 import EpisodeV2
@@ -27,4 +28,4 @@ class RoutingCallbacks(DefaultCallbacks):
             for metric, value in env.numeric_metrics.items():
                 metrics[metric].append(value)
 
-        episode.hist_data.update(metrics)
+        episode.custom_metrics.update({k: np.mean(v) for k, v in metrics.items()})
