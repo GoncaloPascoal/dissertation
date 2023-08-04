@@ -9,7 +9,7 @@ from ray.rllib import Policy
 from routing.circuit_gen import CircuitGenerator, RandomCircuitGenerator, LayeredCircuitGenerator, \
     DatasetCircuitGenerator
 from routing.env import RoutingEnvCreator, CircuitMatrix, ObsModule
-from routing.noise import NoiseConfig, UniformNoiseGenerator, NoiseGenerator
+from routing.noise import NoiseConfig, UniformNoiseGenerator, NoiseGenerator, KdeNoiseGenerator
 from routing.orchestration import TrainingOrchestrator, EvaluationOrchestrator
 from routing.topology import t_topology, h_topology, grid_topology, linear_topology
 
@@ -32,6 +32,8 @@ CIRCUIT_GENERATORS: Final[dict[str, Callable[..., CircuitGenerator]]] = {
 
 NOISE_GENERATORS: Final[dict[str, Callable[..., NoiseGenerator]]] = {
     'uniform': UniformNoiseGenerator,
+    'uniform_samples': UniformNoiseGenerator.from_samples,
+    'kde': KdeNoiseGenerator,
 }
 
 

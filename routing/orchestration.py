@@ -1,6 +1,6 @@
 
 import time
-from collections.abc import Sequence, Collection, Set
+from collections.abc import Collection, Set
 from math import inf
 from numbers import Real
 from typing import Any, ClassVar, Optional, Self, cast
@@ -35,9 +35,10 @@ class TrainingOrchestrator:
         circuit_generator: CircuitGenerator,
         *,
         noise_generator: Optional[NoiseGenerator] = None,
+        recalibration_interval: int = 16,
         episodes_per_circuit: int = 1,
         lr: float = 1e-4,
-        hidden_layers: Optional[Sequence[int]] = None,
+        hidden_layers: Optional[list[int]] = None,
         activation_fn: str = 'silu',
         batch_size: int = 8192,
         minibatch_size: int = 128,
@@ -51,7 +52,13 @@ class TrainingOrchestrator:
 
         # TODO: maybe refactor
         def create_env(_config: dict[str, Any]) -> TrainingWrapper:
-            return TrainingWrapper(env_creator.create(), circuit_generator, noise_generator, episodes_per_circuit)
+            return TrainingWrapper(
+                env_creator.create(),
+                circuit_generator,
+                noise_generator=noise_generator,
+                recalibration_interval=recalibration_interval,
+                episodes_per_circuit=episodes_per_circuit,
+            )
 
         register_env(TrainingOrchestrator.ENV_NAME, create_env)
 

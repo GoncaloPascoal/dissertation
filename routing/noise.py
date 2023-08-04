@@ -1,10 +1,14 @@
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Callable
 from dataclasses import dataclass, field
 from math import e
+from numbers import Number
+from typing import Optional, Self
 
 import numpy as np
 from nptyping import NDArray
+from scipy.stats import gaussian_kde
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,38 +49,50 @@ class NoiseGenerator(ABC):
     """
     Allows configuration of randomly generated gate error rates. Intended to be used when training noise-aware
     reinforcement learning models.
-
-    :param recalibration_interval: Error rates will be regenerated after routing this many circuits.
     """
-
-    def __init__(self, *, recalibration_interval: int = 16):
-        if recalibration_interval <= 0:
-            raise ValueError(f'Recalibration interval must be positive, got {recalibration_interval}')
-
-        self.recalibration_interval = recalibration_interval
 
     @abstractmethod
     def generate_error_rates(self, n: int) -> NDArray:
         raise NotImplementedError
 
-
 class UniformNoiseGenerator(NoiseGenerator):
     """
     Generates gate error rates according to a normal distribution (clamped between 0 and 1).
 
-    :ivar mean: Mean gate error rate.
-    :ivar std: Standard deviation of gate error rates.
+    :param mean: Mean gate error rate.
+    :param std: Standard deviation of gate error rates.
     """
-    mean: float
-    std: float
-    recalibration_interval: int = field(default=16, kw_only=True)
 
-    def __init__(self, mean: float, std: float, *, recalibration_interval: int = 16):
-        super().__init__(recalibration_interval=recalibration_interval)
+    def __init__(self, mean: float, std: float):
+        super().__init__()
 
         self.mean = mean
         self.std = std
 
+    @classmethod
+    def from_samples(cls, samples: Iterable[float]) -> Self:
+        """
+        Create a noise generator using the mean and standard deviation of a set of samples.
+        """
+        samples = np.array(samples, copy=False)
+        return cls(samples.mean(), samples.std())
+
     def generate_error_rates(self, n: int) -> NDArray:
         return np.random.normal(self.mean, self.std, n).clip(0.0, 1.0)
 
+class KdeNoiseGenerator(NoiseGenerator):
+    """
+    Applies Gaussian `kernel density estimation <https://en.wikipedia.org/wiki/Kernel_density_estimation>`_ to
+    a set of gate error rate samples and generates error rates according to the resulting probability distribution.
+
+    :param samples: Gate error rate samples.
+    :param bw_method: Method used to calculate the estimator bandwidth (passed to ``scipy.stats.gaussian_kde``, see
+        `SciPy documentation <https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.gaussian_kde.html>`_
+        for more information).
+    """
+
+    def __init__(self, samples: Iterable[float], *, bw_method: Optional[str | Number | Callable] = None):
+        self.kde = gaussian_kde(samples, bw_method=bw_method)
+
+    def generate_error_rates(self, n: int) -> NDArray:
+        return np.squeeze(self.kde.resample(n)).clip(0.0, 1.0)
