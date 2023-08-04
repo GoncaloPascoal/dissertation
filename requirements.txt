@@ -6,6 +6,7 @@ qiskit-ibm-provider>=0.6
 ray[rllib]>=2.6
 rich>=13.5
 rustworkx>=0.13
+scipy>=1.11
 seaborn>=0.12
 torch>=2.0
 tqdm>=4.65
