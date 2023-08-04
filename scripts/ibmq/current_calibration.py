@@ -23,21 +23,28 @@ def fetch_properties(backend_name: str) -> dict[str, Any]:
         raise RuntimeError(f'Request for backend {backend_name} failed with status code {response.status_code}')
 
 
+def save_properties(base_dir: str, backend_name: str, data: dict[str, Any]):
+    update_date = data['last_update_date']
+    update_date = update_date if isinstance(update_date, datetime) else datetime.fromisoformat(update_date)
+
+    file_name = update_date.isoformat(sep='T')
+
+    path = os.path.join(base_dir, backend_name, f'{file_name}.json')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    with open(path, 'w') as f:
+        json.dump(data, f, default=str)
+
+
 def main():
     base_dir = os.path.join('data', 'calibration')
     backends = ['ibmq_guadalupe', 'ibm_hanoi', 'ibm_cairo', 'ibmq_mumbai', 'ibmq_kolkata', 'ibm_algiers']
 
     for backend in backends:
         data = fetch_properties(backend)
-        update_date = data['last_update_date']
+        print(f'Fetched {backend} data, last updated at {datetime.fromisoformat(data["last_update_date"])}')
 
-        print(f'Fetched {backend} data, last updated at {datetime.fromisoformat(update_date)}')
-
-        path = os.path.join(base_dir, backend, f'{update_date}.json')
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
-        with open(path, 'w') as f:
-            json.dump(data, f)
+        save_properties(base_dir, backend, data)
 
         # Avoid getting rate limited
         sleep(random.uniform(0.5, 1.0))
