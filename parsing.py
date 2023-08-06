@@ -44,7 +44,7 @@ def parse_yaml(path: str) -> dict[str, Any]:
 def parse_env_config(path: str) -> RoutingEnvCreator:
     config = parse_yaml(path)
 
-    coupling_map_config: dict[str, Any] | str | list = config['coupling_map']
+    coupling_map_config: dict[str, Any] | str | list = config.pop('coupling_map')
 
     if isinstance(coupling_map_config, dict):
         coupling_map = COUPLING_MAPS[coupling_map_config['type']](**coupling_map_config.get('args', {}))
@@ -56,10 +56,10 @@ def parse_env_config(path: str) -> RoutingEnvCreator:
     else:
         raise ValueError(f'Coupling map configuration has invalid type `{type(coupling_map_config)}`')
 
-    noise_config = NoiseConfig() if config.get('noise_aware', True) else None
+    noise_config = NoiseConfig() if config.pop('noise_aware', True) else None
 
     obs_modules = []
-    obs_modules_config: list[str | dict[str, Any]] = config.get('obs_modules', [])
+    obs_modules_config: list[str | dict[str, Any]] = config.pop('obs_modules', [])
     for om_config in obs_modules_config:
         if isinstance(om_config, str):
             obs_modules.append(OBS_MODULES[om_config]())
@@ -72,7 +72,7 @@ def parse_env_config(path: str) -> RoutingEnvCreator:
         coupling_map=coupling_map,
         noise_config=noise_config,
         obs_modules=obs_modules,
-        **config.get('args', {})
+        **config,
     )
 
 

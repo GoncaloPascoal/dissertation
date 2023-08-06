@@ -28,7 +28,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
     :param recalibration_interval: Error rates will be regenerated after routing this many circuits.
     :param episodes_per_circuit: Number of episodes per generated circuit.
 
-    :ivar iter: Current training iteration.
+    :ivar current_iter: Current training iteration.
     """
 
     env: RoutingEnv
@@ -55,7 +55,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
 
         super().__init__(env)
 
-        self.iter = 0
+        self.current_iter = 0
 
     def reset(
         self,
@@ -65,14 +65,14 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
     ) -> tuple[RoutingObsType, dict[str, Any]]:
         self.env.initial_mapping = _generate_random_mapping(self.num_qubits)
 
-        if self.iter % self.episodes_per_circuit == 0:
+        if self.current_iter % self.episodes_per_circuit == 0:
             self.env.circuit = self.circuit_generator.generate()
 
-        if self.noise_aware and self.iter % self.recalibration_interval == 0:
+        if self.noise_aware and self.current_iter % self.recalibration_interval == 0:
             error_rates = self.noise_generator.generate_error_rates(self.env.num_edges)
             self.env.calibrate(error_rates)
 
-        self.iter += 1
+        self.current_iter += 1
 
         return super().reset(seed=seed, options=options)
 
@@ -88,7 +88,7 @@ class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
                             noise-aware. As this is an evaluation environment, the error rates are only generated once.
     :param evaluation_iters: Number of evaluation iterations per generated circuit.
 
-    :ivar iter: Current training iteration.
+    :ivar current_iter: Current training iteration.
     """
 
     env: RoutingEnv
@@ -109,7 +109,7 @@ class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
 
         super().__init__(env)
 
-        self.iter = 0
+        self.current_iter = 0
 
     def reset(
         self,
@@ -117,9 +117,9 @@ class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         seed: Optional[int] = None,
         options: Optional[dict[str, Any]] = None,
     ) -> tuple[RoutingObsType, dict[str, Any]]:
-        if self.iter % self.evaluation_iters == 0:
+        if self.current_iter % self.evaluation_iters == 0:
             self.env.circuit = self.circuit_generator.generate()
 
-        self.iter += 1
+        self.current_iter += 1
 
         return super().reset(seed=seed, options=options)

@@ -7,8 +7,6 @@ from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.utils.typing import PolicyID
 
-from routing.env import RoutingEnv
-
 
 class RoutingCallbacks(DefaultCallbacks):
     def on_episode_end(
@@ -21,7 +19,7 @@ class RoutingCallbacks(DefaultCallbacks):
         env_index: Optional[int] = None,
         **kwargs,
     ) -> None:
-        envs: list[RoutingEnv] = base_env.get_sub_environments()
+        envs = base_env.get_sub_environments()
 
         metrics = defaultdict(list)
         for env in envs:

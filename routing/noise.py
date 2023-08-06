@@ -50,6 +50,8 @@ class NoiseGenerator(ABC):
     Allows configuration of randomly generated gate error rates. Intended to be used when training noise-aware
     reinforcement learning models.
     """
+    def __init__(self, *, seed: Optional[int] = None):
+        self.rng = np.random.default_rng(seed)
 
     @abstractmethod
     def generate_error_rates(self, n: int) -> NDArray:
@@ -63,8 +65,8 @@ class UniformNoiseGenerator(NoiseGenerator):
     :param std: Standard deviation of gate error rates.
     """
 
-    def __init__(self, mean: float, std: float):
-        super().__init__()
+    def __init__(self, mean: float, std: float, *, seed: Optional[int] = None):
+        super().__init__(seed=seed)
 
         self.mean = mean
         self.std = std
@@ -91,7 +93,15 @@ class KdeNoiseGenerator(NoiseGenerator):
         for more information).
     """
 
-    def __init__(self, samples: Iterable[float], *, bw_method: Optional[str | Number | Callable] = None):
+    def __init__(
+        self,
+        samples: Iterable[float],
+        *,
+        seed: Optional[int] = None,
+        bw_method: Optional[str | Number | Callable] = None
+    ):
+        super().__init__(seed=seed)
+
         self.kde = gaussian_kde(samples, bw_method=bw_method)
 
     def generate_error_rates(self, n: int) -> NDArray:
