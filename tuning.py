@@ -1,4 +1,7 @@
 
+import logging
+
+import ray
 from ray import air
 from ray import tune
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
@@ -13,6 +16,8 @@ from routing.orchestration import register_routing_env, ROUTING_ENV_NAME
 
 
 def main():
+    ray.init(logging_level=logging.ERROR)
+
     env_creator = parse_env_config('config/env.yaml')
     circuit_generator = RandomCircuitGenerator(5, 64)
     noise_generator = UniformNoiseGenerator(1e-2, 3e-3)
@@ -28,11 +33,9 @@ def main():
         .training(_enable_learner_api=False)
         .resources(num_gpus=0.5, num_cpus_for_local_worker=0)
         .rl_module(_enable_rl_module_api=False)
-        .rollouts(num_rollout_workers=4,)
+        .rollouts(num_rollout_workers=6)
     )
     trainable = tune.with_resources(PPO, PPO.default_resource_request(resource_config))
-
-    print(PPO.default_resource_request(resource_config))
 
     hyperparam_mutations = dict(
         lr=tune.qloguniform(1e-5, 1e-3, 5e-6),
@@ -48,7 +51,7 @@ def main():
             metric='episode_reward_mean',
             mode='max',
             scheduler=pbt,
-            num_samples=10,
+            num_samples=6,
         ),
         param_space=dict(
             # Training
@@ -74,7 +77,11 @@ def main():
             # Framework
             framework='torch',
             # Rollouts
+            num_rollout_workers=6,
             num_envs_per_worker=8,
+            # Resources
+            num_gpus=0.5,
+            num_cpus_for_local_worker=0,
             # RL Module
             _enable_rl_module_api=False,
         ),
