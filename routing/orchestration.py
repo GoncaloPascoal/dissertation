@@ -99,7 +99,7 @@ class TrainingOrchestrator:
                 _enable_learner_api=False,
             )
             .callbacks(RoutingCallbacks)
-            .environment(env=TrainingOrchestrator.ENV_NAME)
+            .environment(env=ROUTING_ENV_NAME)
             .fault_tolerance(
                 recreate_failed_workers=True,
                 restart_failed_sub_environments=True,
