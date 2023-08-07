@@ -31,14 +31,18 @@ def main():
     resource_config = (
         PPOConfig()
         .training(_enable_learner_api=False)
-        .resources(num_gpus=0.5, num_cpus_for_local_worker=0)
+        .resources(num_gpus=1, num_cpus_for_local_worker=0)
         .rl_module(_enable_rl_module_api=False)
-        .rollouts(num_rollout_workers=6)
+        .rollouts(num_rollout_workers=9)
     )
     trainable = tune.with_resources(PPO, PPO.default_resource_request(resource_config))
 
     hyperparam_mutations = dict(
         lr=tune.qloguniform(1e-5, 1e-3, 5e-6),
+        num_sgd_iter=tune.randint(3, 15),
+        clip_param=tune.quniform(0.1, 0.3, 0.01),
+        entropy_coeff=tune.quniform(0.0, 1e-2, 2e-4),
+        vf_loss_coeff=tune.quniform(0.5, 1.0, 0.02),
     )
 
     pbt = PopulationBasedTraining(
@@ -48,10 +52,10 @@ def main():
     tuner = tune.Tuner(
         trainable,
         tune_config=tune.TuneConfig(
-            metric='episode_reward_mean',
-            mode='max',
+            metric='episode_len_mean',
+            mode='min',
             scheduler=pbt,
-            num_samples=6,
+            num_samples=8,
         ),
         param_space=dict(
             # Training
@@ -65,9 +69,10 @@ def main():
             train_batch_size=8192,
             lambda_=0.95,
             sgd_minibatch_size=256,
-            num_sgd_iter=10,
-            vf_loss_coeff=0.5,
-            clip_param=0.2,
+            num_sgd_iter=tune.randint(3, 15),
+            entropy_coeff=tune.quniform(0.0, 1e-2, 2e-4),
+            vf_loss_coeff=tune.quniform(0.5, 1.0, 0.02),
+            clip_param=tune.quniform(0.1, 0.3, 0.01),
             grad_clip=0.5,
             # Environment
             env=ROUTING_ENV_NAME,
@@ -77,10 +82,10 @@ def main():
             # Framework
             framework='torch',
             # Rollouts
-            num_rollout_workers=6,
+            num_rollout_workers=9,
             num_envs_per_worker=8,
             # Resources
-            num_gpus=0.5,
+            num_gpus=1,
             num_cpus_for_local_worker=0,
             # RL Module
             _enable_rl_module_api=False,
