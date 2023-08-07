@@ -39,7 +39,7 @@ def main():
     )
 
     pbt = PopulationBasedTraining(
-        hyperparam_mutations=hyperparam_mutations
+        hyperparam_mutations=hyperparam_mutations,
     )
 
     tuner = tune.Tuner(
@@ -48,6 +48,7 @@ def main():
             metric='episode_reward_mean',
             mode='max',
             scheduler=pbt,
+            num_samples=10,
         ),
         param_space=dict(
             # Training
