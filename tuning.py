@@ -23,8 +23,16 @@ def main():
         noise_generator=noise_generator,
     )
 
-    resource_config = PPOConfig().rollouts(num_rollout_workers=4).resources(num_gpus=0.5)
+    resource_config = (
+        PPOConfig()
+        .training(_enable_learner_api=False)
+        .resources(num_gpus=0.5, num_cpus_for_local_worker=0)
+        .rl_module(_enable_rl_module_api=False)
+        .rollouts(num_rollout_workers=4,)
+    )
     trainable = tune.with_resources(PPO, PPO.default_resource_request(resource_config))
+
+    print(PPO.default_resource_request(resource_config))
 
     hyperparam_mutations = dict(
         lr=tune.qloguniform(1e-5, 1e-3, 5e-6),
