@@ -110,7 +110,8 @@ def parse_eval_config(env_path: str, eval_path: str, override_args: Optional[dic
     env = parse_env_config(env_path).create()
     config = parse_yaml(eval_path)
 
-    checkpoint_path = config.pop('checkpoint_path', None) or override_args['checkpoint_path']
+    checkpoint_path = config.pop('checkpoint_path', None)
+    checkpoint_path = override_args.pop('checkpoint_path', checkpoint_path)
     policy = Policy.from_checkpoint(checkpoint_path)['default_policy']
 
     circuit_generator = _parse_circuit_generator_config(config.pop('circuit_generator'))

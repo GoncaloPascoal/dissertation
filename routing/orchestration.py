@@ -32,7 +32,7 @@ def register_routing_env(
     circuit_generator: CircuitGenerator,
     *,
     noise_generator: Optional[NoiseGenerator] = None,
-    recalibration_interval: int = 16,
+    recalibration_interval: int = 32,
     episodes_per_circuit: int = 1,
 ):
     def create_env(_config: dict[str, Any]) -> TrainingWrapper:
@@ -56,7 +56,7 @@ class TrainingOrchestrator:
         circuit_generator: CircuitGenerator,
         *,
         noise_generator: Optional[NoiseGenerator] = None,
-        recalibration_interval: int = 16,
+        recalibration_interval: int = 32,
         episodes_per_circuit: int = 1,
         lr: float = 1e-4,
         hidden_layers: Optional[list[int]] = None,
