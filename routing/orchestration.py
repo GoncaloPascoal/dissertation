@@ -3,7 +3,7 @@ import time
 from collections.abc import Collection, Set
 from math import inf
 from numbers import Real
-from typing import Any, ClassVar, Optional, Self, cast
+from typing import Any, ClassVar, Optional, Self, cast, Final
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -24,9 +24,30 @@ from routing.noise import NoiseGenerator
 from utils import reliability
 
 
-class TrainingOrchestrator:
-    ENV_NAME: ClassVar[str] = 'RoutingEnv'
+ROUTING_ENV_NAME: Final[str] = 'RoutingEnv'
 
+
+def register_routing_env(
+    env_creator: RoutingEnvCreator,
+    circuit_generator: CircuitGenerator,
+    *,
+    noise_generator: Optional[NoiseGenerator] = None,
+    recalibration_interval: int = 16,
+    episodes_per_circuit: int = 1,
+):
+    def create_env(_config: dict[str, Any]) -> TrainingWrapper:
+        return TrainingWrapper(
+            env_creator.create(),
+            circuit_generator,
+            noise_generator=noise_generator,
+            recalibration_interval=recalibration_interval,
+            episodes_per_circuit=episodes_per_circuit,
+        )
+
+    register_env(ROUTING_ENV_NAME, create_env)
+
+
+class TrainingOrchestrator:
     algorithm: PPO
 
     def __init__(
@@ -51,16 +72,13 @@ class TrainingOrchestrator:
             hidden_layers = [64, 64]
 
         # TODO: maybe refactor
-        def create_env(_config: dict[str, Any]) -> TrainingWrapper:
-            return TrainingWrapper(
-                env_creator.create(),
-                circuit_generator,
-                noise_generator=noise_generator,
-                recalibration_interval=recalibration_interval,
-                episodes_per_circuit=episodes_per_circuit,
-            )
-
-        register_env(TrainingOrchestrator.ENV_NAME, create_env)
+        register_routing_env(
+            env_creator,
+            circuit_generator,
+            noise_generator=noise_generator,
+            recalibration_interval=recalibration_interval,
+            episodes_per_circuit=episodes_per_circuit,
+        )
 
         config = (
             PPOConfig()
