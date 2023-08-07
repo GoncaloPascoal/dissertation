@@ -1,7 +1,7 @@
 
 from ray import air
 from ray import tune
-from ray.rllib.algorithms.ppo import PPO
+from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.tune.schedulers import PopulationBasedTraining
 from rich import print
 
@@ -23,6 +23,9 @@ def main():
         noise_generator=noise_generator,
     )
 
+    resource_config = PPOConfig().rollouts(num_rollout_workers=4).resources(num_gpus=0.5)
+    trainable = tune.with_resources(PPO, PPO.default_resource_request(resource_config))
+
     hyperparam_mutations = dict(
         lr=tune.qloguniform(1e-5, 1e-3, 5e-6),
     )
@@ -32,7 +35,7 @@ def main():
     )
 
     tuner = tune.Tuner(
-        PPO,
+        trainable,
         tune_config=tune.TuneConfig(
             metric='episode_reward_mean',
             mode='max',
@@ -62,11 +65,7 @@ def main():
             # Framework
             framework='torch',
             # Rollouts
-            num_rollout_workers=6,
             num_envs_per_worker=8,
-            # Resources
-            num_gpus=0.5,
-            num_cpus_for_local_worker=0,
             # RL Module
             _enable_rl_module_api=False,
         ),
