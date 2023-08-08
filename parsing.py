@@ -6,15 +6,17 @@ import rustworkx as rx
 import yaml
 from ray.rllib import Policy
 
-from routing.circuit_gen import CircuitGenerator, RandomCircuitGenerator, LayeredCircuitGenerator, \
-    DatasetCircuitGenerator
-from routing.env import RoutingEnvCreator, CircuitMatrix, ObsModule
+from routing.circuit_gen import (
+    CircuitGenerator, RandomCircuitGenerator, LayeredCircuitGenerator, DatasetCircuitGenerator
+)
+from routing.env import RoutingEnvCreator, CircuitMatrix, ObsModule, QubitInteractions
 from routing.noise import NoiseConfig, UniformNoiseGenerator, NoiseGenerator, KdeNoiseGenerator
 from routing.orchestration import TrainingOrchestrator, EvaluationOrchestrator
 from routing.topology import t_topology, h_topology, grid_topology, linear_topology
 
 OBS_MODULES: Final[dict[str, type[ObsModule]]] = {
     'circuit_matrix': CircuitMatrix,
+    'qubit_interactions': QubitInteractions,
 }
 
 COUPLING_MAPS: Final[dict[str, Callable[..., rx.PyGraph]]] = {
