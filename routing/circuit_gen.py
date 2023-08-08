@@ -1,9 +1,11 @@
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Optional, Self
 
 import numpy as np
 from qiskit import QuantumCircuit
+
+from revlib import files_in_dir
 
 
 class CircuitGenerator(ABC):
@@ -12,10 +14,22 @@ class CircuitGenerator(ABC):
 
     @abstractmethod
     def generate(self) -> QuantumCircuit:
+        """Generate a quantum circuit."""
         raise NotImplementedError
+
+    def seed(self, seed: Optional[int] = None):
+        """Reseed the random number generator used to generate circuits."""
+        self.rng = np.random.default_rng(seed)
 
 
 class RandomCircuitGenerator(CircuitGenerator):
+    """
+    Generates quantum circuits by iteratively inserting CNOT gates between random qubits.
+
+    :param num_qubits: Circuit qubit count.
+    :param num_gates: Circuit gate count (number of CNOTs).
+    """
+
     def __init__(self, num_qubits: int, num_gates: int, *, seed: Optional[int] = None):
         super().__init__(seed=seed)
 
@@ -37,7 +51,17 @@ class RandomCircuitGenerator(CircuitGenerator):
         return qc
 
 
-class LayeredRandomCircuitGenerator(CircuitGenerator):
+class LayeredCircuitGenerator(CircuitGenerator):
+    """
+    Generates quantum circuits from layers of two-qubit gates. Layers correspond to groups of gates that can be
+    executed in parallel (i.e., share no qubits).
+
+    :param num_qubits: Circuit qubit count.
+    :param num_layers: Circuit layer count.
+    :param density: Layer density (ratio between 0 and 1). Controls the amount of two-qubit gates present in
+        each layer. This value is an upper bound, so the true density may be lower depending on the qubit count.
+    """
+
     def __init__(self, num_qubits: int, num_layers: int = 1, density: float = 1.0, *, seed: Optional[int] = None):
         super().__init__(seed=seed)
 
@@ -67,7 +91,14 @@ class LayeredRandomCircuitGenerator(CircuitGenerator):
 
 
 class DatasetCircuitGenerator(CircuitGenerator):
-    def __init__(self, dataset: List[QuantumCircuit], random: bool = True, *, seed: Optional[int] = None):
+    """
+    Returns quantum circuits from a given dataset (either sequentially or randomly).
+
+    :param dataset: Circuits to return.
+    :param random: If ``True``, return circuits in a random order.
+    """
+
+    def __init__(self, dataset: list[QuantumCircuit], *, random: bool = False, seed: Optional[int] = None):
         super().__init__(seed=seed)
 
         if not dataset:
@@ -76,6 +107,11 @@ class DatasetCircuitGenerator(CircuitGenerator):
         self.dataset = dataset
         self.random = random
         self.idx = 0
+
+    @classmethod
+    def from_dir(cls, path: str, *, random: bool = False, seed: Optional[int] = None) -> Self:
+        dataset = [QuantumCircuit.from_qasm_file(file_path) for file_path in files_in_dir(path)]
+        return cls(dataset, random=random, seed=seed)
 
     def generate(self) -> QuantumCircuit:
         if self.random:
