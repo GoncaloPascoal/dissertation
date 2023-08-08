@@ -18,6 +18,7 @@ def main():
                         help='evaluation iterations per circuit')
     parser.add_argument('-r', '--routing-methods', nargs='+', choices=['basic', 'stochastic', 'sabre'],
                         default=argparse.SUPPRESS, help='routing method(s) for Qiskit compiler')
+    parser.add_argument('-s', '--seed', type=int, default=argparse.SUPPRESS, help='seed for random number generators')
     parser.add_argument('--num-circuits', metavar='N', type=int, default=argparse.SUPPRESS,
                         help='number of (random) evaluation circuits')
     parser.add_argument('--use-tqdm', action='store_const', const=True, default=argparse.SUPPRESS,

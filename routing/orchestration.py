@@ -1,13 +1,16 @@
 
+import random
 import time
 from collections.abc import Collection, Set
 from math import inf
 from numbers import Real
-from typing import Any, ClassVar, Optional, Self, cast, Final
+from typing import Any, Optional, Self, cast, Final
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
+import torch
 from qiskit import QuantumCircuit, transpile
 from qiskit.transpiler import CouplingMap
 from ray.rllib import Policy
@@ -22,7 +25,6 @@ from routing.env import RoutingEnvCreator, RoutingEnv
 from routing.env_wrapper import TrainingWrapper, EvaluationWrapper
 from routing.noise import NoiseGenerator
 from utils import reliability
-
 
 ROUTING_ENV_NAME: Final[str] = 'RoutingEnv'
 
@@ -156,6 +158,15 @@ class EvaluationOrchestrator:
 
         if num_circuits <= 0:
             raise ValueError(f'Number of evaluation circuits must be positive, got {num_circuits}')
+
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+
+            circuit_generator.seed(seed)
+            if noise_generator is not None:
+                noise_generator.seed(seed)
 
         self.policy = policy
         self.eval_env = EvaluationWrapper(

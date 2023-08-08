@@ -57,6 +57,10 @@ class NoiseGenerator(ABC):
     def generate_error_rates(self, n: int) -> NDArray:
         raise NotImplementedError
 
+    def seed(self, seed: Optional[int] = None):
+        """Reseed the random number generator used to generate gate error rates."""
+        self.rng = np.random.default_rng(seed)
+
 class UniformNoiseGenerator(NoiseGenerator):
     """
     Generates gate error rates according to a normal distribution (clamped between 0 and 1).
