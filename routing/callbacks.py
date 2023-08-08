@@ -1,3 +1,4 @@
+
 from collections import defaultdict
 from typing import Optional
 
@@ -23,7 +24,7 @@ class RoutingCallbacks(DefaultCallbacks):
 
         metrics = defaultdict(list)
         for env in envs:
-            for metric, value in env.numeric_metrics.items():
+            for metric, value in env.metrics.items():
                 metrics[metric].append(value)
 
         episode.custom_metrics.update({k: np.mean(v) for k, v in metrics.items()})

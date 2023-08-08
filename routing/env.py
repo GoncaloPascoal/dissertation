@@ -21,12 +21,12 @@ from qiskit.transpiler.passes import CommutationAnalysis
 from routing.noise import NoiseConfig
 from utils import qubits_to_indices, indices_to_qubits, dag_layers
 
-RoutingObsType: TypeAlias = dict[str, NDArray]
+RoutingObs: TypeAlias = dict[str, NDArray]
 GateSchedulingList: TypeAlias = list[tuple[DAGOpNode, tuple[int, ...]]]
 BridgeArgs: TypeAlias = tuple[DAGOpNode, tuple[int, int, int]]
 
 
-class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
+class RoutingEnv(gym.Env[RoutingObs, int], ABC):
     """
     Base qubit routing environment.
 
@@ -157,7 +157,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         self.observation_space = spaces.Dict(self._obs_spaces())
 
         # Custom metrics
-        self.numeric_metrics = defaultdict(float)
+        self.metrics = defaultdict(float)
 
     @property
     def noise_aware(self) -> bool:
@@ -172,8 +172,8 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
         *,
         seed: Optional[int] = None,
         options: Optional[dict[str, Any]] = None,
-    ) -> tuple[RoutingObsType, dict[str, Any]]:
-        self.numeric_metrics.clear()
+    ) -> tuple[RoutingObs, dict[str, Any]]:
+        self.metrics.clear()
 
         if self.circuit.num_qubits < self.num_qubits:
             self.circuit.add_register(AncillaRegister(self.num_qubits - self.circuit.num_qubits))
@@ -189,7 +189,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
         return self.current_obs(), {}
 
-    def step(self, action: int) -> tuple[RoutingObsType, SupportsFloat, bool, bool, dict[str, Any]]:
+    def step(self, action: int) -> tuple[RoutingObs, SupportsFloat, bool, bool, dict[str, Any]]:
         if self.terminated:
             # Environment terminated immediately and does not require routing
             return self.current_obs(), 0.0, True, False, {}
@@ -305,7 +305,7 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
         return env
 
-    def current_obs(self) -> RoutingObsType:
+    def current_obs(self) -> RoutingObs:
         return {
             'action_mask': self.action_mask(),
             'true_obs': {module.key(): module.obs(self) for module in self.obs_modules},
@@ -385,15 +385,15 @@ class RoutingEnv(gym.Env[RoutingObsType, int], ABC):
 
     def _bridge(self, control: int, middle: int, target: int):
         if self.log_metrics:
-            self.numeric_metrics['added_cnot_count'] += 3
-            self.numeric_metrics['bridge_count'] += 1
+            self.metrics['added_cnot_count'] += 3
+            self.metrics['bridge_count'] += 1
 
         self.routed_gates.append((self.bridge_gate, (control, middle, target)))
 
     def _swap(self, edge: tuple[int, int]):
         if self.log_metrics:
-            self.numeric_metrics['added_cnot_count'] += 3
-            self.numeric_metrics['swap_count'] += 1
+            self.metrics['added_cnot_count'] += 3
+            self.metrics['swap_count'] += 1
 
         self.routed_gates.append((self.swap_gate, edge))
 

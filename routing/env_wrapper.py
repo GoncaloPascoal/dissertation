@@ -6,7 +6,7 @@ import numpy as np
 from nptyping import NDArray
 
 from routing.circuit_gen import CircuitGenerator
-from routing.env import RoutingEnv, RoutingObsType
+from routing.env import RoutingEnv, RoutingObs
 from routing.noise import NoiseGenerator
 
 
@@ -16,7 +16,7 @@ def _generate_random_mapping(num_qubits: int) -> NDArray:
     return mapping
 
 
-class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
+class TrainingWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
     """
     Wraps a :py:class:`RoutingEnv`, automatically generating circuits and gate error rates at fixed intervals to
     help train deep learning algorithms.
@@ -62,7 +62,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         *,
         seed: Optional[int] = None,
         options: Optional[dict[str, Any]] = None,
-    ) -> tuple[RoutingObsType, dict[str, Any]]:
+    ) -> tuple[RoutingObs, dict[str, Any]]:
         self.env.initial_mapping = _generate_random_mapping(self.num_qubits)
 
         if self.current_iter % self.episodes_per_circuit == 0:
@@ -77,7 +77,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         return super().reset(seed=seed, options=options)
 
 
-class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
+class EvaluationWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
     """
     Wraps a :py:class:`RoutingEnv`, automatically generating circuits to evaluate the performance of a reinforcement
     learning model.
@@ -116,7 +116,7 @@ class EvaluationWrapper(gym.Wrapper[RoutingObsType, int, RoutingObsType, int]):
         *,
         seed: Optional[int] = None,
         options: Optional[dict[str, Any]] = None,
-    ) -> tuple[RoutingObsType, dict[str, Any]]:
+    ) -> tuple[RoutingObs, dict[str, Any]]:
         if self.current_iter % self.evaluation_iters == 0:
             self.env.circuit = self.circuit_generator.generate()
 
