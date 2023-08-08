@@ -12,7 +12,7 @@ from routing.circuit_gen import (
 from routing.env import RoutingEnvCreator, CircuitMatrix, ObsModule, QubitInteractions
 from routing.noise import NoiseConfig, UniformNoiseGenerator, NoiseGenerator, KdeNoiseGenerator
 from routing.orchestration import TrainingOrchestrator, EvaluationOrchestrator
-from routing.topology import t_topology, h_topology, grid_topology, linear_topology
+from routing.topology import t_topology, h_topology, grid_topology, linear_topology, ibm_16q_topology, ibm_27q_topology
 
 OBS_MODULES: Final[dict[str, type[ObsModule]]] = {
     'circuit_matrix': CircuitMatrix,
@@ -24,6 +24,8 @@ COUPLING_MAPS: Final[dict[str, Callable[..., rx.PyGraph]]] = {
     'h': h_topology,
     'grid': grid_topology,
     'linear': linear_topology,
+    'ibm_16q': ibm_16q_topology,
+    'ibm_27q': ibm_27q_topology,
 }
 
 CIRCUIT_GENERATORS: Final[dict[str, Callable[..., CircuitGenerator]]] = {
