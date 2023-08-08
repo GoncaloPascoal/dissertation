@@ -110,7 +110,6 @@ class TrainingOrchestrator:
             .resources(num_gpus=num_gpus)
             .rl_module(_enable_rl_module_api=False)
             .rollouts(
-                batch_mode='complete_episodes',
                 num_rollout_workers=num_workers,
                 num_envs_per_worker=envs_per_worker,
             )

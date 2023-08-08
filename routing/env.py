@@ -2,6 +2,7 @@
 import copy
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
+from math import prod
 from typing import Optional, Any, SupportsFloat, Self, TypeAlias, Literal
 
 import gymnasium as gym
@@ -58,8 +59,10 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
 
     routed_gates: list[tuple[Operation, tuple[int, ...]]]
     routed_op_nodes: set[DAGOpNode]
+
     log_reliabilities: NDArray
     edge_to_log_reliability: dict[tuple[int, int], float]
+    edge_to_reliability: dict[tuple[int, int], float]
 
     pair_to_bridge_args: dict[tuple[int, int], BridgeArgs]
 
@@ -173,7 +176,11 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         seed: Optional[int] = None,
         options: Optional[dict[str, Any]] = None,
     ) -> tuple[RoutingObs, dict[str, Any]]:
-        self.metrics.clear()
+        if self.log_metrics:
+            self.metrics.clear()
+
+            if self.noise_aware:
+                self.metrics['reliability'] = 1.0
 
         if self.circuit.num_qubits < self.num_qubits:
             self.circuit.add_register(AncillaRegister(self.num_qubits - self.circuit.num_qubits))
@@ -284,9 +291,17 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             self.log_reliabilities = self.noise_config.calculate_log_reliabilities(error_rates)
 
             self.edge_to_log_reliability = {}
-            for edge, value in zip(self.edge_list, self.log_reliabilities):
-                self.edge_to_log_reliability[edge] = value
-                self.edge_to_log_reliability[edge[::-1]] = value
+            for edge, log_reliability in zip(self.edge_list, self.log_reliabilities):
+                self.edge_to_log_reliability[edge] = log_reliability
+                self.edge_to_log_reliability[edge[::-1]] = log_reliability
+
+            if self.log_metrics:
+                # Only need non-log reliabilities for calculating additional metrics
+                reliabilities = 1.0 - error_rates
+                self.edge_to_reliability = {}
+                for edge, reliability in zip(self.edge_list, reliabilities):
+                    self.edge_to_reliability[edge] = reliability
+                    self.edge_to_reliability[edge[::-1]] = reliability
 
     def copy(self) -> Self:
         """
@@ -335,8 +350,13 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             self.routed_gates.append((op_node.op, nodes))
             self._remove_op_node(op_node)
 
-        self._num_scheduled_2q_gates = len(gates)
-        self._scheduling_reward = sum(self._gate_reward(nodes) for _, nodes in gates if len(nodes) == 2)  # type: ignore
+        nodes_2q = [nodes for op_node, nodes in gates if len(nodes) == 2]
+
+        self._num_scheduled_2q_gates = len(nodes_2q)
+        self._scheduling_reward = sum(self._gate_reward(edge) for edge in nodes_2q)  # type: ignore
+
+        if self.log_metrics and self.noise_aware:
+            self.metrics['reliability'] *= prod(self.edge_to_reliability[edge] for edge in nodes_2q)  # type: ignore
 
     def _schedulable_gates(self, only_front_layer: bool = False) -> GateSchedulingList:
         gates = OrderedSet()
@@ -388,12 +408,20 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             self.metrics['added_cnot_count'] += 3
             self.metrics['bridge_count'] += 1
 
+            if self.noise_aware:
+                self.metrics['reliability'] *= (
+                    self.edge_to_reliability[(middle, target)] * self.edge_to_reliability[(control, middle)]
+                ) ** 2
+
         self.routed_gates.append((self.bridge_gate, (control, middle, target)))
 
     def _swap(self, edge: tuple[int, int]):
         if self.log_metrics:
             self.metrics['added_cnot_count'] += 3
             self.metrics['swap_count'] += 1
+
+            if self.noise_aware:
+                self.metrics['reliability'] *= self.edge_to_reliability[edge] ** 3
 
         self.routed_gates.append((self.swap_gate, edge))
 
