@@ -39,10 +39,19 @@ def main():
 
     hyperparam_mutations = dict(
         lr=tune.qloguniform(1e-5, 1e-3, 5e-6),
+        sgd_minibatch_size=tune.choice([128, 256, 512]),
         num_sgd_iter=tune.randint(3, 15),
+        lambda_=tune.quniform(0.9, 1.0, 0.01),
         clip_param=tune.quniform(0.1, 0.3, 0.01),
         entropy_coeff=tune.quniform(0.0, 1e-2, 2e-4),
         vf_loss_coeff=tune.quniform(0.5, 1.0, 0.02),
+        model=dict(
+            custom_model=ActionMaskModel,
+            fcnet_hiddens=tune.sample_from(
+                lambda: tune.choice([64, 96, 128, 192, 256]).sample() * tune.randint(1, 3).sample()
+            ),
+            fcnet_activation=tune.choice(['silu', 'relu', 'tanh']),
+        )
     )
 
     pbt = PopulationBasedTraining(
@@ -60,20 +69,9 @@ def main():
         param_space=dict(
             # Training
             _enable_learner_api=False,
-            lr=tune.qloguniform(1e-5, 1e-3, 5e-6),
-            model=dict(
-                custom_model=ActionMaskModel,
-                fcnet_hiddens=[64, 64, 96],
-                fcnet_activation='silu',
-            ),
             train_batch_size=8192,
-            lambda_=0.95,
-            sgd_minibatch_size=256,
-            num_sgd_iter=tune.randint(3, 15),
-            entropy_coeff=tune.quniform(0.0, 1e-2, 2e-4),
-            vf_loss_coeff=tune.quniform(0.5, 1.0, 0.02),
-            clip_param=tune.quniform(0.1, 0.3, 0.01),
             grad_clip=0.5,
+            **hyperparam_mutations,
             # Environment
             env=ROUTING_ENV_NAME,
             # Fault Tolerance
@@ -92,7 +90,7 @@ def main():
         ),
         run_config=air.RunConfig(
             stop=dict(
-                training_iteration=100,
+                training_iteration=200,
             ),
         ),
     )
