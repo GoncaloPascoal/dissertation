@@ -16,7 +16,7 @@ def _generate_random_mapping(num_qubits: int) -> NDArray:
     return mapping
 
 
-class TrainingWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
+class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
     """
     Wraps a :py:class:`RoutingEnv`, automatically generating circuits and gate error rates at fixed intervals to
     help train deep learning algorithms.
@@ -77,7 +77,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
         return super().reset(seed=seed, options=options)
 
 
-class EvaluationWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
+class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
     """
     Wraps a :py:class:`RoutingEnv`, automatically generating circuits to evaluate the performance of a reinforcement
     learning model.
