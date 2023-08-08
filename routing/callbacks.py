@@ -1,12 +1,12 @@
 
-from collections import defaultdict
 from typing import Optional
 
-import numpy as np
 from ray.rllib import BaseEnv, RolloutWorker, Policy
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.utils.typing import PolicyID
+
+from routing.env_wrapper import TrainingWrapper
 
 
 class RoutingCallbacks(DefaultCallbacks):
@@ -20,11 +20,9 @@ class RoutingCallbacks(DefaultCallbacks):
         env_index: Optional[int] = None,
         **kwargs,
     ) -> None:
-        envs = base_env.get_sub_environments()
+        if env_index is not None:
+            training_env: TrainingWrapper = base_env.get_sub_environments()[env_index]
 
-        metrics = defaultdict(list)
-        for env in envs:
-            for metric, value in env.metrics.items():
-                metrics[metric].append(value)
-
-        episode.custom_metrics.update({k: np.mean(v) for k, v in metrics.items()})
+            if training_env.env.log_metrics:
+                episode.custom_metrics.update(training_env.env.metrics)
+                episode.hist_data.update({k: [v] for k, v in training_env.env.metrics.items()})
