@@ -67,7 +67,7 @@ def main():
         model=dict(
             custom_model=ActionMaskModel,
             fcnet_hiddens=tune.sample_from(
-                lambda: tune.choice([64, 96, 128, 192, 256]).sample() * tune.randint(1, 3).sample()
+                lambda: [tune.choice([64, 96, 128, 192, 256]).sample()] * tune.randint(1, 3).sample()
             ),
             fcnet_activation=tune.choice(['silu', 'relu', 'tanh']),
         )
