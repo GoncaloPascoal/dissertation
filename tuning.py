@@ -8,7 +8,9 @@ from ray import tune
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.rllib.env import EnvContext
 from ray.tune import register_env
+from ray.tune.logger import TBXLoggerCallback
 from ray.tune.schedulers import PopulationBasedTraining
+from ray.tune.schedulers.pb2 import PB2
 from rich import print
 
 from action_mask_model import ActionMaskModel
@@ -58,27 +60,25 @@ def main():
     )
     trainable = tune.with_resources(PPO, PPO.default_resource_request(resource_config))
 
-    hyperparam_mutations = dict(
-        lr=tune.qloguniform(1e-5, 1e-3, 5e-6),
-        sgd_minibatch_size=tune.choice([128, 256, 512]),
-        num_sgd_iter=tune.randint(3, 15),
-        lambda_=tune.quniform(0.9, 1.0, 0.01),
-        clip_param=tune.quniform(0.1, 0.3, 0.01),
-        entropy_coeff=tune.quniform(0.0, 1e-2, 2e-4),
-        vf_loss_coeff=tune.quniform(0.5, 1.0, 0.02),
+    hyperparam_bounds = dict(
+        lr=[1e-5, 1e-3],
+        lambda_=[0.9, 1.0],
+        clip_param=[0.1, 0.3],
+        entropy_coeff=[0.0, 0.01],
+        vf_loss_coeff=[0.5, 1.0],
     )
 
-    pbt = PopulationBasedTraining(
-        hyperparam_mutations=hyperparam_mutations,
+    pb2 = PB2(
+        hyperparam_bounds=hyperparam_bounds,
     )
 
     tuner = tune.Tuner(
         trainable,
         tune_config=tune.TuneConfig(
-            metric='episode_len_mean',
-            mode='min',
-            scheduler=pbt,
-            num_samples=8,
+            metric='episode_reward_mean',
+            mode='max',
+            scheduler=pb2,
+            num_samples=4,
         ),
         param_space=dict(
             # Training
@@ -92,7 +92,13 @@ def main():
                 ),
                 fcnet_activation=tune.choice(['silu', 'relu', 'tanh']),
             ),
-            **hyperparam_mutations,
+            lr=tune.qloguniform(1e-5, 1e-3, 5e-6),
+            sgd_minibatch_size=tune.choice([128, 256, 512]),
+            num_sgd_iter=tune.randint(3, 15),
+            lambda_=tune.quniform(0.9, 1.0, 0.01),
+            clip_param=tune.quniform(0.1, 0.3, 0.01),
+            entropy_coeff=tune.quniform(0.0, 1e-2, 2e-4),
+            vf_loss_coeff=tune.quniform(0.5, 1.0, 0.02),
             # Debugging
             log_level='ERROR',
             # Environment
@@ -112,6 +118,7 @@ def main():
             _enable_rl_module_api=False,
         ),
         run_config=air.RunConfig(
+            callbacks=[TBXLoggerCallback()],
             stop=dict(
                 training_iteration=200,
             ),
@@ -121,7 +128,7 @@ def main():
     results = tuner.fit()
     best_result = results.get_best_result()
 
-    print({k: v for k, v in best_result.config.items() if k in hyperparam_mutations})
+    print(best_result.config)
 
 
 if __name__ == '__main__':
