@@ -9,8 +9,8 @@ from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.rllib.env import EnvContext
 from ray.tune import register_env
 from ray.tune.logger import TBXLoggerCallback
-from ray.tune.schedulers import PopulationBasedTraining
-from ray.tune.schedulers.pb2 import PB2
+from ray.tune.schedulers import HyperBandForBOHB
+from ray.tune.search.bohb import TuneBOHB
 from rich import print
 
 from action_mask_model import ActionMaskModel
@@ -60,25 +60,17 @@ def main():
     )
     trainable = tune.with_resources(PPO, PPO.default_resource_request(resource_config))
 
-    hyperparam_bounds = dict(
-        lr=[1e-5, 1e-3],
-        lambda_=[0.9, 1.0],
-        clip_param=[0.1, 0.3],
-        entropy_coeff=[0.0, 0.01],
-        vf_loss_coeff=[0.5, 1.0],
-    )
-
-    pb2 = PB2(
-        hyperparam_bounds=hyperparam_bounds,
-    )
+    bohb_hyperband = HyperBandForBOHB(max_t=200)
+    bohb = TuneBOHB()
 
     tuner = tune.Tuner(
         trainable,
         tune_config=tune.TuneConfig(
             metric='episode_reward_mean',
             mode='max',
-            scheduler=pb2,
             num_samples=4,
+            scheduler=bohb_hyperband,
+            search_alg=bohb,
         ),
         param_space=dict(
             # Training
@@ -119,9 +111,6 @@ def main():
         ),
         run_config=air.RunConfig(
             callbacks=[TBXLoggerCallback()],
-            stop=dict(
-                training_iteration=200,
-            ),
         ),
     )
 
