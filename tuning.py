@@ -78,6 +78,9 @@ def main():
         hyperparam_mutations=hyperparam_mutations,
     )
 
+    initial_hyperparams = hyperparam_mutations.copy()
+    initial_hyperparams.pop('model')
+
     tuner = tune.Tuner(
         trainable,
         tune_config=tune.TuneConfig(
@@ -95,7 +98,7 @@ def main():
                 custom_model=ActionMaskModel,
                 **model_hyperparam_mutations,
             ),
-            **hyperparam_mutations,
+            **initial_hyperparams,
             # Environment
             env=ROUTING_ENV_NAME,
             # Fault Tolerance
