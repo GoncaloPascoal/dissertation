@@ -114,6 +114,9 @@ def main():
         ),
         run_config=air.RunConfig(
             callbacks=[TBXLoggerCallback()],
+            stop=dict(
+                time_total_s=600,
+            )
         ),
     )
 
