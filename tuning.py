@@ -9,7 +9,7 @@ from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.rllib.env import EnvContext
 from ray.tune import register_env
 from ray.tune.logger import TBXLoggerCallback
-from ray.tune.schedulers import AsyncHyperBandScheduler
+from ray.tune.schedulers import PopulationBasedTraining
 from rich import print
 
 from action_mask_model import ActionMaskModel
@@ -59,19 +59,27 @@ def main():
     )
     trainable = tune.with_resources(PPO, PPO.default_resource_request(resource_config))
 
-    asha = AsyncHyperBandScheduler(
-        time_attr='time_total_s',
-        grace_period=60,
-        max_t=1800,
+    hyperparam_mutations = dict(
+        lr=tune.qloguniform(1e-5, 1e-3, 5e-6),
+        sgd_minibatch_size=tune.choice([128, 256, 512]),
+        num_sgd_iter=tune.randint(3, 15),
+        lambda_=tune.quniform(0.9, 1.0, 0.01),
+        clip_param=tune.quniform(0.1, 0.3, 0.01),
+        entropy_coeff=tune.quniform(0.0, 1e-2, 2e-4),
+        vf_loss_coeff=tune.quniform(0.5, 1.0, 0.02),
+    )
+
+    pbt = PopulationBasedTraining(
+        hyperparam_mutations=hyperparam_mutations,
     )
 
     tuner = tune.Tuner(
         trainable,
         tune_config=tune.TuneConfig(
-            metric='episode_reward_mean',
-            mode='max',
-            num_samples=32,
-            scheduler=asha,
+            metric='episode_len_mean',
+            mode='min',
+            scheduler=pbt,
+            num_samples=8,
         ),
         param_space=dict(
             # Training
@@ -85,13 +93,7 @@ def main():
                 ),
                 fcnet_activation='silu',
             ),
-            lr=tune.qloguniform(1e-5, 1e-3, 5e-6),
-            sgd_minibatch_size=tune.choice([128, 256, 512]),
-            num_sgd_iter=tune.randint(3, 15),
-            lambda_=tune.quniform(0.9, 1.0, 0.01),
-            clip_param=tune.quniform(0.1, 0.3, 0.01),
-            entropy_coeff=tune.quniform(0.0, 1e-2, 2e-4),
-            vf_loss_coeff=tune.quniform(0.5, 1.0, 0.02),
+            **hyperparam_mutations,
             # Debugging
             log_level='ERROR',
             # Environment
