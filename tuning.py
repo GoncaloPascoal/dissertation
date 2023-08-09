@@ -60,8 +60,6 @@ def main():
     trainable = tune.with_resources(PPO, PPO.default_resource_request(resource_config))
 
     asha = AsyncHyperBandScheduler(
-        metric='episode_len_mean',
-        mode='min',
         grace_period=10,
         max_t=250,
     )
