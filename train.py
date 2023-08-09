@@ -1,9 +1,11 @@
 
 import argparse
+import logging
 from argparse import ArgumentParser
 from typing import Any
 
 import gymnasium as gym
+import ray
 
 from parsing import parse_train_config
 from routing.env import CircuitMatrixRoutingEnv
@@ -37,6 +39,8 @@ def main():
                         help='number of environments per rollout worker')
 
     args = vars(parser.parse_args())
+
+    ray.init(logging_level=logging.ERROR)
 
     env_config = args.pop('env_config')
     train_config = args.pop('train_config')

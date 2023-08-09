@@ -1,6 +1,9 @@
 
 import argparse
+import logging
 from argparse import ArgumentParser
+
+import ray
 
 from parsing import parse_eval_config
 
@@ -25,6 +28,8 @@ def main():
                         help='show a progress bar using tqdm')
 
     args = vars(parser.parse_args())
+
+    ray.init(logging_level=logging.ERROR)
 
     env_config = args.pop('env_config')
     eval_config = args.pop('eval_config')

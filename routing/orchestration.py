@@ -1,4 +1,4 @@
-
+import copy
 import random
 import time
 from collections.abc import Collection, Set
@@ -47,6 +47,8 @@ class TrainingOrchestrator:
         batch_size: int = 8192,
         minibatch_size: int = 128,
         sgd_iters: int = 10,
+        evaluation_interval: Optional[int] = None,
+        evaluation_duration: int = 256,
         num_gpus: float = 0.0,
         num_workers: int = 2,
         envs_per_worker: int = 4,
@@ -54,7 +56,8 @@ class TrainingOrchestrator:
         if hidden_layers is None:
             hidden_layers = [64, 64]
 
-        def create_env(_config: EnvContext) -> TrainingWrapper:
+        # TODO: potentially refactor into env-specific generators
+        def create_env(_context: EnvContext) -> TrainingWrapper:
             return TrainingWrapper(
                 env_creator(),
                 circuit_generator,
@@ -84,7 +87,12 @@ class TrainingOrchestrator:
                 _enable_learner_api=False,
             )
             .callbacks(RoutingCallbacks)
+            .debugging(log_level='ERROR')
             .environment(env=ROUTING_ENV_NAME)
+            .evaluation(
+                evaluation_interval=evaluation_interval,
+                evaluation_duration=evaluation_duration,
+            )
             .fault_tolerance(
                 recreate_failed_workers=True,
                 restart_failed_sub_environments=True,

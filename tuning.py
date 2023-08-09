@@ -26,8 +26,10 @@ def main():
     num_gates = 64
     base_seed = 0
 
+    envs_per_worker = 8
+
     rng = np.random.default_rng(base_seed)
-    seeds = rng.integers(1e6, size=8)
+    seeds = rng.integers(1e6, size=envs_per_worker)
 
     env_creator = parse_env_config('config/env.yaml')
 
@@ -37,12 +39,12 @@ def main():
     def create_noise_generator(seed: int) -> UniformNoiseGenerator:
         return UniformNoiseGenerator(1e-2, 3e-3, seed=seed)
 
-    def create_env(config: EnvContext) -> TrainingWrapper:
+    def create_env(context: EnvContext) -> TrainingWrapper:
         return TrainingWrapper(
             env_creator(),
-            create_circuit_generator(seeds[config.vector_index]),
-            noise_generator=create_noise_generator(seeds[config.vector_index]),
-            recalibration_interval=128,
+            create_circuit_generator(seeds[context.vector_index]),
+            noise_generator=create_noise_generator(seeds[context.vector_index]),
+            recalibration_interval=64,
         )
 
     register_env(ROUTING_ENV_NAME, create_env)
@@ -91,6 +93,8 @@ def main():
                 fcnet_activation=tune.choice(['silu', 'relu', 'tanh']),
             ),
             **hyperparam_mutations,
+            # Debugging
+            log_level='ERROR',
             # Environment
             env=ROUTING_ENV_NAME,
             # Fault Tolerance
@@ -100,7 +104,7 @@ def main():
             framework='torch',
             # Rollouts
             num_rollout_workers=9,
-            num_envs_per_worker=8,
+            num_envs_per_worker=envs_per_worker,
             # Resources
             num_gpus=1,
             num_cpus_for_local_worker=0,
