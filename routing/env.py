@@ -77,7 +77,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         error_rates: Optional[ArrayLike] = None,
         noise_config: Optional[NoiseConfig] = None,
         obs_modules: Optional[list['ObsModule']] = None,
-        log_metrics: bool = True,
+        log_metrics: bool = False,
     ):
         num_qubits = coupling_map.num_nodes()
         num_edges = coupling_map.num_edges()

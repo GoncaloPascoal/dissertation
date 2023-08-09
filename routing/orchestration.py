@@ -1,4 +1,4 @@
-import copy
+
 import random
 import time
 from collections.abc import Collection, Set
@@ -176,8 +176,7 @@ class EvaluationOrchestrator:
         self.qiskit_coupling_map = CouplingMap(env.coupling_map.to_directed().edge_list())
 
         self.reliability_map = {}
-        for edge, error_rate in zip(env.coupling_map.edge_list(), env.error_rates):  # type: ignore
-            edge_reliability = 1.0 - error_rate
+        for edge, edge_reliability in zip(env.coupling_map.edge_list(), 1.0 - env.error_rates):  # type: ignore
             self.reliability_map[edge] = edge_reliability
             self.reliability_map[edge[::-1]] = edge_reliability
 
