@@ -9,8 +9,8 @@ from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.rllib.env import EnvContext
 from ray.tune import register_env
 from ray.tune.logger import TBXLoggerCallback
-from ray.tune.schedulers import HyperBandForBOHB
-from ray.tune.search.bohb import TuneBOHB
+from ray.tune.schedulers import AsyncHyperBandScheduler
+from ray.tune.search.bayesopt import BayesOptSearch
 from rich import print
 
 from action_mask_model import ActionMaskModel
@@ -60,17 +60,25 @@ def main():
     )
     trainable = tune.with_resources(PPO, PPO.default_resource_request(resource_config))
 
-    bohb_hyperband = HyperBandForBOHB(max_t=200)
-    bohb = TuneBOHB()
+    asha = AsyncHyperBandScheduler(
+        metric='episode_len_mean',
+        mode='min',
+        grace_period=10,
+        max_t=250,
+    )
+
+    bayes_opt = BayesOptSearch(
+        random_search_steps=8,
+    )
 
     tuner = tune.Tuner(
         trainable,
         tune_config=tune.TuneConfig(
             metric='episode_reward_mean',
             mode='max',
-            num_samples=4,
-            scheduler=bohb_hyperband,
-            search_alg=bohb,
+            num_samples=32,
+            scheduler=asha,
+            search_alg=bayes_opt,
         ),
         param_space=dict(
             # Training
