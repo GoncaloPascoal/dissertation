@@ -10,7 +10,6 @@ from ray.rllib.env import EnvContext
 from ray.tune import register_env
 from ray.tune.logger import TBXLoggerCallback
 from ray.tune.schedulers import AsyncHyperBandScheduler
-from ray.tune.search.bayesopt import BayesOptSearch
 from rich import print
 
 from action_mask_model import ActionMaskModel
@@ -67,10 +66,6 @@ def main():
         max_t=250,
     )
 
-    bayes_opt = BayesOptSearch(
-        random_search_steps=8,
-    )
-
     tuner = tune.Tuner(
         trainable,
         tune_config=tune.TuneConfig(
@@ -78,7 +73,6 @@ def main():
             mode='max',
             num_samples=32,
             scheduler=asha,
-            search_alg=bayes_opt,
         ),
         param_space=dict(
             # Training
