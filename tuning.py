@@ -60,8 +60,9 @@ def main():
     trainable = tune.with_resources(PPO, PPO.default_resource_request(resource_config))
 
     asha = AsyncHyperBandScheduler(
-        grace_period=10,
-        max_t=250,
+        time_attr='time_total_s',
+        grace_period=60,
+        max_t=1800,
     )
 
     tuner = tune.Tuner(
@@ -82,7 +83,7 @@ def main():
                 fcnet_hiddens=tune.sample_from(
                     lambda: [tune.choice([64, 96, 128, 192, 256]).sample()] * tune.randint(1, 3).sample()
                 ),
-                fcnet_activation=tune.choice(['silu', 'relu', 'tanh']),
+                fcnet_activation='silu',
             ),
             lr=tune.qloguniform(1e-5, 1e-3, 5e-6),
             sgd_minibatch_size=tune.choice([128, 256, 512]),
