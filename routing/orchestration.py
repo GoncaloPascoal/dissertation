@@ -4,7 +4,7 @@ import time
 from collections.abc import Collection, Set
 from math import inf
 from numbers import Real
-from typing import Any, Optional, Self, cast, Final
+from typing import Optional, Self, cast, Final
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,6 +15,7 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.transpiler import CouplingMap
 from ray.rllib import Policy
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
+from ray.rllib.env import EnvContext
 from ray.tune import register_env
 from tqdm.rich import tqdm
 
@@ -53,7 +54,7 @@ class TrainingOrchestrator:
         if hidden_layers is None:
             hidden_layers = [64, 64]
 
-        def create_env(_config: dict[str, Any]) -> TrainingWrapper:
+        def create_env(_config: EnvContext) -> TrainingWrapper:
             return TrainingWrapper(
                 env_creator(),
                 circuit_generator,
