@@ -47,6 +47,8 @@ class TrainingOrchestrator:
         batch_size: int = 8192,
         minibatch_size: int = 128,
         sgd_iters: int = 10,
+        vf_loss_coeff: float = 1.0,
+        entropy_coeff: float = 0.001,
         evaluation_interval: Optional[int] = None,
         evaluation_duration: int = 256,
         num_gpus: float = 0.0,
@@ -81,7 +83,8 @@ class TrainingOrchestrator:
                 lambda_=0.95,
                 sgd_minibatch_size=minibatch_size,
                 num_sgd_iter=sgd_iters,
-                vf_loss_coeff=0.5,
+                vf_loss_coeff=vf_loss_coeff,
+                entropy_coeff=entropy_coeff,
                 clip_param=0.2,
                 grad_clip=0.5,
                 _enable_learner_api=False,
@@ -98,7 +101,10 @@ class TrainingOrchestrator:
                 restart_failed_sub_environments=True,
             )
             .framework('torch')
-            .resources(num_gpus=num_gpus)
+            .resources(
+                num_gpus=num_gpus,
+                num_cpus_for_local_worker=0 if num_gpus > 0.0 else None,
+            )
             .rl_module(_enable_rl_module_api=False)
             .rollouts(
                 num_rollout_workers=num_workers,
