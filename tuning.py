@@ -56,13 +56,6 @@ def main():
     )
     trainable = tune.with_resources(PPO, PPO.default_resource_request(resource_config))
 
-    model_hyperparam_mutations = dict(
-        fcnet_hiddens=tune.sample_from(
-            lambda: [tune.choice([64, 96, 128, 192, 256]).sample()] * tune.randint(1, 3).sample()
-        ),
-        fcnet_activation=tune.choice(['silu', 'relu', 'tanh']),
-    )
-
     hyperparam_mutations = dict(
         lr=tune.qloguniform(1e-5, 1e-3, 5e-6),
         sgd_minibatch_size=tune.choice([128, 256, 512]),
@@ -71,15 +64,11 @@ def main():
         clip_param=tune.quniform(0.1, 0.3, 0.01),
         entropy_coeff=tune.quniform(0.0, 1e-2, 2e-4),
         vf_loss_coeff=tune.quniform(0.5, 1.0, 0.02),
-        model=model_hyperparam_mutations,
     )
 
     pbt = PopulationBasedTraining(
         hyperparam_mutations=hyperparam_mutations,
     )
-
-    initial_hyperparams = hyperparam_mutations.copy()
-    initial_hyperparams.pop('model')
 
     tuner = tune.Tuner(
         trainable,
@@ -96,9 +85,12 @@ def main():
             grad_clip=0.5,
             model=dict(
                 custom_model=ActionMaskModel,
-                **model_hyperparam_mutations,
+                fcnet_hiddens=tune.sample_from(
+                    lambda: [tune.choice([64, 96, 128, 192, 256]).sample()] * tune.randint(1, 3).sample()
+                ),
+                fcnet_activation=tune.choice(['silu', 'relu', 'tanh']),
             ),
-            **initial_hyperparams,
+            **hyperparam_mutations,
             # Environment
             env=ROUTING_ENV_NAME,
             # Fault Tolerance
