@@ -1,32 +1,53 @@
 
 import logging
+from typing import Any
 
+import numpy as np
 import ray
 from ray import air
 from ray import tune
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
+from ray.tune import register_env
 from ray.tune.schedulers import PopulationBasedTraining
 from rich import print
 
 from action_mask_model import ActionMaskModel
 from parsing import parse_env_config
 from routing.circuit_gen import RandomCircuitGenerator
+from routing.env_wrapper import TrainingWrapper
 from routing.noise import UniformNoiseGenerator
-from routing.orchestration import register_routing_env, ROUTING_ENV_NAME
+from routing.orchestration import ROUTING_ENV_NAME
 
 
 def main():
     ray.init(logging_level=logging.ERROR)
 
-    env_creator = parse_env_config('config/env.yaml')
-    circuit_generator = RandomCircuitGenerator(5, 64)
-    noise_generator = UniformNoiseGenerator(1e-2, 3e-3)
+    num_qubits = 5
+    num_gates = 64
+    base_seed = 0
 
-    register_routing_env(
-        env_creator,
-        circuit_generator,
-        noise_generator=noise_generator,
-    )
+    rng = np.random.default_rng(base_seed)
+    seeds = rng.integers(1e6, size=8)
+
+    env_creator = parse_env_config('config/env.yaml')
+
+    def create_circuit_generator(seed: int) -> RandomCircuitGenerator:
+        return RandomCircuitGenerator(num_qubits, num_gates, seed=seed)
+
+    def create_noise_generator(seed: int) -> UniformNoiseGenerator:
+        return UniformNoiseGenerator(1e-2, 3e-3, seed=seed)
+
+    def create_env(config: dict[str, Any]) -> TrainingWrapper:
+        vector_idx: int = config['vector_idx']
+
+        return TrainingWrapper(
+            env_creator(),
+            create_circuit_generator(seeds[vector_idx]),
+            noise_generator=create_noise_generator(seeds[vector_idx]),
+            recalibration_interval=128,
+        )
+
+    register_env(ROUTING_ENV_NAME, create_env)
 
     resource_config = (
         PPOConfig()

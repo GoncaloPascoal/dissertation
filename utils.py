@@ -1,16 +1,20 @@
 
 import functools
 import operator
-from typing import Iterable
+from collections.abc import Callable
+from typing import Iterable, TypeVar, TypeAlias
 
 from qiskit import QuantumCircuit
 from qiskit.circuit import Qubit, Gate
 from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 
 
+_T = TypeVar('_T')
+Factory: TypeAlias = Callable[[], _T]
+
+
 def qubits_to_indices(qc: QuantumCircuit, qubits: Iterable[Qubit]) -> tuple[int, ...]:
     return tuple(qc.find_bit(q).index for q in qubits)  # type: ignore
-
 
 def indices_to_qubits(qc: QuantumCircuit, indices: Iterable[int]) -> tuple[Qubit, ...]:
     return tuple(qc.qubits[i] for i in indices)

@@ -9,7 +9,7 @@ from ray.rllib import Policy
 from routing.circuit_gen import (
     CircuitGenerator, RandomCircuitGenerator, LayeredCircuitGenerator, DatasetCircuitGenerator
 )
-from routing.env import RoutingEnvCreator, CircuitMatrix, ObsModule, QubitInteractions
+from routing.env import CircuitMatrix, ObsModule, QubitInteractions, RoutingEnv
 from routing.noise import NoiseConfig, UniformNoiseGenerator, NoiseGenerator, KdeNoiseGenerator
 from routing.orchestration import TrainingOrchestrator, EvaluationOrchestrator
 from routing.topology import t_topology, h_topology, grid_topology, linear_topology, ibm_16q_topology, ibm_27q_topology
@@ -45,7 +45,7 @@ def parse_yaml(path: str) -> dict[str, Any]:
     with open(path, 'r') as f:
         return yaml.safe_load(f)
 
-def parse_env_config(path: str) -> RoutingEnvCreator:
+def parse_env_config(path: str) -> Callable[[], RoutingEnv]:
     config = parse_yaml(path)
 
     coupling_map_config: dict[str, Any] | str | list = config.pop('coupling_map')
@@ -72,19 +72,29 @@ def parse_env_config(path: str) -> RoutingEnvCreator:
         else:
             raise ValueError(f'Observation module configuration has invalid type `{type(om_config)}`')
 
-    return RoutingEnvCreator(
-        coupling_map=coupling_map,
-        noise_config=noise_config,
-        obs_modules=obs_modules,
-        **config,
-    )
+    def create_env() -> RoutingEnv:
+        return RoutingEnv(
+            coupling_map,
+            noise_config=noise_config,
+            obs_modules=obs_modules,
+            **config,
+        )
+
+    return create_env
 
 
-def _parse_circuit_generator_config(config: dict[str, Any]) -> CircuitGenerator:
-    return CIRCUIT_GENERATORS[config['type']](**config['args'])
+def parse_generators(config: dict[str, Any]) -> tuple[CircuitGenerator, Optional[NoiseGenerator]]:
+    circuit_config = config.pop('circuit')
+    noise_config = config.pop('noise', None)
 
-def _parse_noise_generator_config(config: dict[str, Any]) -> NoiseGenerator:
-    return NOISE_GENERATORS[config['type']](**config['args'])
+    circuit_generator = CIRCUIT_GENERATORS[circuit_config['type']](**circuit_config['args'])
+
+    noise_generator = None
+    if noise_config is not None:
+        noise_generator = NOISE_GENERATORS[noise_config['type']](**noise_config['args'])
+
+    return circuit_generator, noise_generator
+
 
 def parse_train_config(
     env_path: str,
@@ -94,8 +104,10 @@ def parse_train_config(
     env_creator = parse_env_config(env_path)
     config = parse_yaml(train_path)
 
-    circuit_generator = _parse_circuit_generator_config(config.pop('circuit_generator'))
-    noise_generator = _parse_noise_generator_config(config.pop('noise_generator'))
+    generators_config = config.pop('generators')
+    circuit_generator, noise_generator = parse_generators(
+        parse_yaml(generators_config) if isinstance(generators_config, str) else generators_config
+    )
 
     args = dict(
         env_creator=env_creator,
@@ -111,15 +123,17 @@ def parse_eval_config(env_path: str, eval_path: str, override_args: Optional[dic
     if override_args is None:
         override_args = {}
 
-    env = parse_env_config(env_path).create()
+    env = parse_env_config(env_path)()
     config = parse_yaml(eval_path)
 
     checkpoint_path = config.pop('checkpoint_path', None)
     checkpoint_path = override_args.pop('checkpoint_path', checkpoint_path)
     policy = Policy.from_checkpoint(checkpoint_path)['default_policy']
 
-    circuit_generator = _parse_circuit_generator_config(config.pop('circuit_generator'))
-    noise_generator = _parse_noise_generator_config(config.pop('noise_generator'))
+    generators_config = config.pop('generators')
+    circuit_generator, noise_generator = parse_generators(
+        parse_yaml(generators_config) if isinstance(generators_config, str) else generators_config
+    )
 
     args = dict(
         policy=policy,

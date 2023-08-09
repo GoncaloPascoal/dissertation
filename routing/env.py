@@ -498,46 +498,6 @@ class CircuitMatrixRoutingEnv(RoutingEnv):
         )
 
 
-class RoutingEnvCreator:
-    def __init__(
-        self,
-        coupling_map: rx.PyGraph,
-        circuit: Optional[QuantumCircuit] = None,
-        initial_mapping: Optional[ArrayLike] = None,
-        allow_bridge_gate: bool = True,
-        commutation_analysis: bool = True,
-        restrict_swaps_to_front_layer: bool = True,
-        error_rates: Optional[ArrayLike] = None,
-        noise_config: Optional[NoiseConfig] = None,
-        obs_modules: Optional[list['ObsModule']] = None,
-        log_metrics: bool = True,
-    ):
-        self.coupling_map = coupling_map
-        self.circuit = circuit
-        self.initial_mapping = initial_mapping
-        self.allow_bridge_gate = allow_bridge_gate
-        self.commutation_analysis = commutation_analysis
-        self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
-        self.error_rates = error_rates
-        self.noise_config = noise_config
-        self.obs_modules = obs_modules
-        self.log_metrics = log_metrics
-
-    def create(self) -> RoutingEnv:
-        return RoutingEnv(
-            self.coupling_map,
-            circuit=self.circuit,
-            initial_mapping=self.initial_mapping,
-            allow_bridge_gate=self.allow_bridge_gate,
-            restrict_swaps_to_front_layer=self.restrict_swaps_to_front_layer,
-            commutation_analysis=self.commutation_analysis,
-            error_rates=self.error_rates,
-            noise_config=self.noise_config,
-            obs_modules=self.obs_modules,
-            log_metrics=self.log_metrics,
-        )
-
-
 class ObsModule(ABC):
     @staticmethod
     @abstractmethod

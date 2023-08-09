@@ -21,32 +21,12 @@ from tqdm.rich import tqdm
 from action_mask_model import ActionMaskModel
 from routing.callbacks import RoutingCallbacks
 from routing.circuit_gen import CircuitGenerator, DatasetCircuitGenerator
-from routing.env import RoutingEnvCreator, RoutingEnv
+from routing.env import RoutingEnv
 from routing.env_wrapper import TrainingWrapper, EvaluationWrapper
 from routing.noise import NoiseGenerator
-from utils import reliability
+from utils import reliability, Factory
 
 ROUTING_ENV_NAME: Final[str] = 'RoutingEnv'
-
-
-def register_routing_env(
-    env_creator: RoutingEnvCreator,
-    circuit_generator: CircuitGenerator,
-    *,
-    noise_generator: Optional[NoiseGenerator] = None,
-    recalibration_interval: int = 32,
-    episodes_per_circuit: int = 1,
-):
-    def create_env(_config: dict[str, Any]) -> TrainingWrapper:
-        return TrainingWrapper(
-            env_creator.create(),
-            circuit_generator,
-            noise_generator=noise_generator,
-            recalibration_interval=recalibration_interval,
-            episodes_per_circuit=episodes_per_circuit,
-        )
-
-    register_env(ROUTING_ENV_NAME, create_env)
 
 
 class TrainingOrchestrator:
@@ -54,7 +34,7 @@ class TrainingOrchestrator:
 
     def __init__(
         self,
-        env_creator: RoutingEnvCreator,
+        env_creator: Factory[RoutingEnv],
         circuit_generator: CircuitGenerator,
         *,
         noise_generator: Optional[NoiseGenerator] = None,
@@ -73,14 +53,16 @@ class TrainingOrchestrator:
         if hidden_layers is None:
             hidden_layers = [64, 64]
 
-        # TODO: maybe refactor
-        register_routing_env(
-            env_creator,
-            circuit_generator,
-            noise_generator=noise_generator,
-            recalibration_interval=recalibration_interval,
-            episodes_per_circuit=episodes_per_circuit,
-        )
+        def create_env(_config: dict[str, Any]) -> TrainingWrapper:
+            return TrainingWrapper(
+                env_creator(),
+                circuit_generator,
+                noise_generator=noise_generator,
+                recalibration_interval=recalibration_interval,
+                episodes_per_circuit=episodes_per_circuit,
+            )
+
+        register_env(ROUTING_ENV_NAME, create_env)
 
         config = (
             PPOConfig()
