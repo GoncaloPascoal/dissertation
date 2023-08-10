@@ -13,7 +13,7 @@ from nptyping import NDArray, Int8
 from numpy.typing import ArrayLike
 from ordered_set import OrderedSet
 from qiskit import QuantumCircuit, AncillaRegister
-from qiskit.circuit import Operation
+from qiskit.circuit import Operation, Qubit
 from qiskit.circuit.library import SwapGate, CXGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGOpNode
@@ -358,15 +358,15 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         if self.log_metrics and self.noise_aware:
             self.metrics['reliability'] *= prod(self.edge_to_reliability[edge] for edge in nodes_2q)  # type: ignore
 
+    def _commuting_op_nodes(self, op_node: DAGOpNode, qubit: Qubit) -> OrderedSet[DAGOpNode]:
+        commutation_set = self.commutation_pass.property_set['commutation_set']
+        idx = commutation_set[(op_node, qubit)]
+        return OrderedSet(commutation_set[qubit][idx])
+
     def _schedulable_gates(self, only_front_layer: bool = False) -> GateSchedulingList:
         gates = OrderedSet()
         op_nodes = self.dag.front_layer() if only_front_layer else self.dag.op_nodes()
         locked_nodes: set[int] = set()
-
-        commutation_set: Optional[dict] = (
-            self.commutation_pass.property_set['commutation_set'] if self.commutation_analysis
-            else None
-        )
 
         for op_node in op_nodes:
             indices = qubits_to_indices(self.circuit, op_node.qargs)
@@ -378,17 +378,31 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
                 if self.commutation_analysis:
                     free_qargs = (q for q in op_node.qargs if self.circuit.find_bit(q)[0] not in locked_nodes)
                     for qubit in free_qargs:
-                        idx = commutation_set[(op_node, qubit)]
-
-                        commuting_op_nodes: OrderedSet[DAGOpNode] = OrderedSet(commutation_set[qubit][idx])
+                        commuting_op_nodes = self._commuting_op_nodes(op_node, qubit)
                         commuting_op_nodes.difference_update({op_node}, self.routed_op_nodes)
 
                         for commuting_op_node in commuting_op_nodes:
-                            commuting_indices = qubits_to_indices(self.circuit, commuting_op_node.qargs)
-                            commuting_nodes = tuple(self.qubit_to_node[i] for i in commuting_indices)
+                            commutes = True
+                            cmt_qargs = commuting_op_node.qargs
 
-                            if self._is_schedulable(commuting_nodes, locked_nodes):
-                                gates.add((commuting_op_node, commuting_nodes))
+                            if len(cmt_qargs) == 2:
+                                other_qubit = cmt_qargs[0] if cmt_qargs[1] == qubit else cmt_qargs[1]
+                                other_commuting_op_nodes = self._commuting_op_nodes(commuting_op_node, other_qubit)
+
+                                for wire_op_node in self.dag.nodes_on_wire(other_qubit):
+                                    if wire_op_node == commuting_op_node:
+                                        break
+
+                                    if wire_op_node not in other_commuting_op_nodes:
+                                        commutes = False
+                                        break
+
+                            if commutes:
+                                cmt_indices = qubits_to_indices(self.circuit, cmt_qargs)
+                                cmt_nodes = tuple(self.qubit_to_node[i] for i in cmt_indices)
+
+                                if self._is_schedulable(cmt_nodes, locked_nodes):
+                                    gates.add((commuting_op_node, cmt_nodes))
 
                 locked_nodes.update(nodes)
 

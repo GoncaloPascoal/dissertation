@@ -21,10 +21,14 @@ def indices_to_qubits(qc: QuantumCircuit, indices: Iterable[int]) -> tuple[Qubit
 
 
 def reliability(circuit: QuantumCircuit, reliability_map: dict[tuple[int, ...], float]) -> float:
-    return functools.reduce(operator.mul, [
-        reliability_map[qubits_to_indices(circuit, instruction.qubits)]
-        for instruction in circuit.get_instructions('cx')
-    ])
+    return functools.reduce(
+        operator.mul,
+        [
+            reliability_map[qubits_to_indices(circuit, instruction.qubits)]
+            for instruction in circuit.get_instructions('cx')
+        ],
+        1.0,
+    )
 
 
 def dag_layers(dag: DAGCircuit) -> list[list[DAGOpNode]]:

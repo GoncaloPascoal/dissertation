@@ -4,6 +4,7 @@ from typing import Optional, Any
 import gymnasium as gym
 import numpy as np
 from nptyping import NDArray
+from qiskit import transpile
 
 from routing.circuit_gen import CircuitGenerator
 from routing.env import RoutingEnv, RoutingObs
@@ -118,7 +119,13 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
         options: Optional[dict[str, Any]] = None,
     ) -> tuple[RoutingObs, dict[str, Any]]:
         if self.current_iter % self.evaluation_iters == 0:
-            self.env.circuit = self.circuit_generator.generate()
+            # TODO: extract IBM gate set to constant
+            self.env.circuit = transpile(
+                self.circuit_generator.generate(),
+                basis_gates=['cx', 'id', 'rz', 'sx', 'x'],
+                optimization_level=0,
+                seed_transpiler=0,
+            )
 
         self.current_iter += 1
 
