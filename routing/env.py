@@ -353,9 +353,9 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
                 self.metrics['reliability'] *= self.edge_to_reliability[nodes]  # type: ignore
 
     def _commuting_op_nodes(self, op_node: DAGOpNode, qubit: Qubit) -> OrderedSet[DAGOpNode]:
-        commutation_set = self.commutation_pass.property_set['commutation_set']
-        idx = commutation_set[(op_node, qubit)]
-        return OrderedSet(commutation_set[qubit][idx])
+        commutation_info = self.commutation_pass.property_set['commutation_set']
+        idx = commutation_info[(op_node, qubit)]
+        return OrderedSet(commutation_info[qubit][idx])
 
     def _schedule_gates(self, only_front_layer: bool = False):
         self._num_scheduled_2q_gates = 0
@@ -370,45 +370,57 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             indices = qubits_to_indices(self.circuit, qargs)
             nodes = tuple(self.qubit_to_node[i] for i in indices)
 
-            if self._is_schedulable(nodes, locked_nodes) or op_node in to_schedule:
+            if len(locked_nodes) < self.num_qubits:
+                if op_node in to_schedule or self._is_schedulable(nodes, locked_nodes):
+                    self._schedule_gate(op_node, nodes)
+                elif len(locked_nodes) < self.num_qubits:
+                    if self.commutation_analysis:
+                        commutation_sets: dict[Qubit, OrderedSet[DAGOpNode]] = {
+                            q: self._commuting_op_nodes(op_node, q)
+                            for q in qargs
+                            if self.circuit.find_bit(q)[0] not in locked_nodes
+                        }
+
+                        all_commuting_nodes: set[DAGOpNode] = set().union(*commutation_sets.values())
+
+                        for qubit, commuting_nodes in commutation_sets.items():
+                            commuting_nodes.difference_update({op_node}, self.routed_op_nodes)
+
+                            for commuting_node in commuting_nodes:
+                                commutes = True
+                                cmt_qargs = commuting_node.qargs
+
+                                if len(cmt_qargs) == 2:
+                                    other_qubit = cmt_qargs[0] if cmt_qargs[1] == qubit else cmt_qargs[1]
+                                    other_commuting_nodes = self._commuting_op_nodes(commuting_node, other_qubit)
+
+                                    for wire_node in self.dag.nodes_on_wire(other_qubit, only_ops=True):
+                                        if wire_node == commuting_node:
+                                            break
+
+                                        # If the current node in this wire does not share qubits with the original
+                                        # op_node, it must commute with the commuting_op_node. Otherwise, it must
+                                        # commute with the original op_node.
+
+                                        must_commute_with = (
+                                            all_commuting_nodes if set(wire_node.qargs).intersection(qargs)
+                                            else other_commuting_nodes
+                                        )
+
+                                        if wire_node not in must_commute_with:
+                                            commutes = False
+                                            break
+
+                                if commutes:
+                                    cmt_indices = qubits_to_indices(self.circuit, cmt_qargs)
+                                    cmt_nodes = tuple(self.qubit_to_node[i] for i in cmt_indices)
+
+                                    if self._is_schedulable(cmt_nodes, locked_nodes):
+                                        to_schedule.add(commuting_node)
+
+                    locked_nodes.update(nodes)
+            elif op_node in to_schedule:
                 self._schedule_gate(op_node, nodes)
-            elif len(locked_nodes) < self.num_qubits:
-                if self.commutation_analysis:
-                    commutation_sets = {
-                        q: self._commuting_op_nodes(op_node, q)
-                        for q in qargs
-                        if self.circuit.find_bit(q)[0] not in locked_nodes
-                    }
-
-                    all_commuting_nodes = set().union(*commutation_sets.values())
-
-                    for qubit, commuting_nodes in commutation_sets.items():
-                        commuting_nodes = self._commuting_op_nodes(op_node, qubit)
-                        commuting_nodes.difference_update({op_node}, self.routed_op_nodes)
-
-                        for commuting_op_node in commuting_nodes:
-                            commutes = True
-                            cmt_qargs = commuting_op_node.qargs
-
-                            if len(cmt_qargs) == 2:
-                                other_qubit = cmt_qargs[0] if cmt_qargs[1] == qubit else cmt_qargs[1]
-
-                                for wire_op_node in self.dag.nodes_on_wire(other_qubit, only_ops=True):
-                                    if wire_op_node == commuting_op_node:
-                                        break
-
-                                    if wire_op_node not in all_commuting_nodes:
-                                        commutes = False
-                                        break
-
-                            if commutes:
-                                cmt_indices = qubits_to_indices(self.circuit, cmt_qargs)
-                                cmt_nodes = tuple(self.qubit_to_node[i] for i in cmt_indices)
-
-                                if self._is_schedulable(cmt_nodes, locked_nodes):
-                                    to_schedule.add(commuting_op_node)
-
-                locked_nodes.update(nodes)
 
     def _is_schedulable(self, nodes: tuple[int, ...], locked_nodes: set[int]) -> bool:
         valid_under_current_mapping = len(nodes) != 2 or self.coupling_map.has_edge(nodes[0], nodes[1])

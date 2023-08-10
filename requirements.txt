@@ -1,6 +1,7 @@
 gymnasium==0.26.3
 nptyping>=2.5
 ordered-set>=4.1
+pytest>=7.4
 qiskit>=0.44
 qiskit-ibm-provider>=0.6
 ray[rllib]>=2.6
