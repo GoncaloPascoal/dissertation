@@ -2,7 +2,6 @@
 import copy
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
-from math import prod
 from typing import Optional, Any, SupportsFloat, Self, TypeAlias, Literal
 
 import gymnasium as gym
@@ -223,7 +222,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
                 print('Invalid BRIDGE action was selected')
                 reward = 0.0
 
-        self._update_state()
+        self._schedule_gates()
         reward += self._scheduling_reward
         self._blocked_swap = action if action_is_swap and self._num_scheduled_2q_gates == 0 else None
 
@@ -332,9 +331,6 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             routed_dag.apply_operation_back(op, indices_to_qubits(self.circuit, nodes))
         return dag_to_circuit(routed_dag)
 
-    def _update_state(self):
-        self._schedule_gates(self._schedulable_gates())
-
     def _obs_spaces(self) -> dict[str, spaces.Space]:
         return {
             'action_mask': spaces.Box(0, 1, shape=(self.action_space.n,), dtype=np.int8),
@@ -345,55 +341,63 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         self.dag.remove_op_node(op_node)
         self.routed_op_nodes.add(op_node)
 
-    def _schedule_gates(self, gates: GateSchedulingList):
-        for op_node, nodes in gates:
-            self.routed_gates.append((op_node.op, nodes))
-            self._remove_op_node(op_node)
+    def _schedule_gate(self, op_node: DAGOpNode, nodes: tuple[int, ...]):
+        self.routed_gates.append((op_node.op, nodes))
+        self._remove_op_node(op_node)
 
-        nodes_2q = [nodes for op_node, nodes in gates if len(nodes) == 2]
+        if len(nodes) == 2:
+            self._num_scheduled_2q_gates += 1
+            self._scheduling_reward += self._gate_reward(nodes)  # type: ignore
 
-        self._num_scheduled_2q_gates = len(nodes_2q)
-        self._scheduling_reward = sum(self._gate_reward(edge) for edge in nodes_2q)  # type: ignore
-
-        if self.log_metrics and self.noise_aware:
-            self.metrics['reliability'] *= prod(self.edge_to_reliability[edge] for edge in nodes_2q)  # type: ignore
+            if self.log_metrics and self.noise_aware:
+                self.metrics['reliability'] *= self.edge_to_reliability[nodes]  # type: ignore
 
     def _commuting_op_nodes(self, op_node: DAGOpNode, qubit: Qubit) -> OrderedSet[DAGOpNode]:
         commutation_set = self.commutation_pass.property_set['commutation_set']
         idx = commutation_set[(op_node, qubit)]
         return OrderedSet(commutation_set[qubit][idx])
 
-    def _schedulable_gates(self, only_front_layer: bool = False) -> GateSchedulingList:
-        gates = OrderedSet()
+    def _schedule_gates(self, only_front_layer: bool = False):
+        self._num_scheduled_2q_gates = 0
+        self._scheduling_reward = 0.0
+
         op_nodes = self.dag.front_layer() if only_front_layer else self.dag.op_nodes()
         locked_nodes: set[int] = set()
+        to_schedule = set()
 
         for op_node in op_nodes:
-            indices = qubits_to_indices(self.circuit, op_node.qargs)
+            qargs = op_node.qargs
+            indices = qubits_to_indices(self.circuit, qargs)
             nodes = tuple(self.qubit_to_node[i] for i in indices)
 
-            if self._is_schedulable(nodes, locked_nodes):
-                gates.add((op_node, nodes))
-            else:
+            if self._is_schedulable(nodes, locked_nodes) or op_node in to_schedule:
+                self._schedule_gate(op_node, nodes)
+            elif len(locked_nodes) < self.num_qubits:
                 if self.commutation_analysis:
-                    free_qargs = (q for q in op_node.qargs if self.circuit.find_bit(q)[0] not in locked_nodes)
-                    for qubit in free_qargs:
-                        commuting_op_nodes = self._commuting_op_nodes(op_node, qubit)
-                        commuting_op_nodes.difference_update({op_node}, self.routed_op_nodes)
+                    commutation_sets = {
+                        q: self._commuting_op_nodes(op_node, q)
+                        for q in qargs
+                        if self.circuit.find_bit(q)[0] not in locked_nodes
+                    }
 
-                        for commuting_op_node in commuting_op_nodes:
+                    all_commuting_nodes = set().union(*commutation_sets.values())
+
+                    for qubit, commuting_nodes in commutation_sets.items():
+                        commuting_nodes = self._commuting_op_nodes(op_node, qubit)
+                        commuting_nodes.difference_update({op_node}, self.routed_op_nodes)
+
+                        for commuting_op_node in commuting_nodes:
                             commutes = True
                             cmt_qargs = commuting_op_node.qargs
 
                             if len(cmt_qargs) == 2:
                                 other_qubit = cmt_qargs[0] if cmt_qargs[1] == qubit else cmt_qargs[1]
-                                other_commuting_op_nodes = self._commuting_op_nodes(commuting_op_node, other_qubit)
 
-                                for wire_op_node in self.dag.nodes_on_wire(other_qubit):
+                                for wire_op_node in self.dag.nodes_on_wire(other_qubit, only_ops=True):
                                     if wire_op_node == commuting_op_node:
                                         break
 
-                                    if wire_op_node not in other_commuting_op_nodes:
+                                    if wire_op_node not in all_commuting_nodes:
                                         commutes = False
                                         break
 
@@ -402,14 +406,9 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
                                 cmt_nodes = tuple(self.qubit_to_node[i] for i in cmt_indices)
 
                                 if self._is_schedulable(cmt_nodes, locked_nodes):
-                                    gates.add((commuting_op_node, cmt_nodes))
+                                    to_schedule.add(commuting_op_node)
 
                 locked_nodes.update(nodes)
-
-            if len(locked_nodes) == self.num_qubits:
-                break
-
-        return list(gates)
 
     def _is_schedulable(self, nodes: tuple[int, ...], locked_nodes: set[int]) -> bool:
         valid_under_current_mapping = len(nodes) != 2 or self.coupling_map.has_edge(nodes[0], nodes[1])
@@ -473,7 +472,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         for node, qubit in enumerate(self.node_to_qubit):
             self.qubit_to_node[qubit] = node
 
-        self._update_state()
+        self._schedule_gates()
 
 
 class CircuitMatrixRoutingEnv(RoutingEnv):
