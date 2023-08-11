@@ -126,6 +126,9 @@ class TrainingOrchestrator:
                 restart_failed_sub_environments=True,
             )
             .framework('torch')
+            .reporting(
+                metrics_num_episodes_for_smoothing=1000,
+            )
             .resources(
                 num_gpus=num_gpus,
                 num_cpus_for_local_worker=0 if num_gpus > 0.0 else None,
