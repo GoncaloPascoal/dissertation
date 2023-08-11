@@ -13,7 +13,7 @@ generators:
 
 # Model
 hidden_layers: [256, 256, 256]
-minibatch_size: 512
+minibatch_size: 1024
 batch_size: 16834
 
 # Resources

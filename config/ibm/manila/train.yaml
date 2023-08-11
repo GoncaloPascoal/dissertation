@@ -13,8 +13,13 @@ generators:
 
 # Model
 hidden_layers: [96, 96, 96]
-minibatch_size: 256
+minibatch_size: 512
 batch_size: 8192
+lr_schedule:
+    - [0, 3.0e-4]
+    - [491_520, 1.0e-4]
+    - [1_638_400, 5.0e-5]
+    - [2_457_600, 3.0e-5]
 
 # Resources
 num_workers: 18
