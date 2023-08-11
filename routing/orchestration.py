@@ -1,4 +1,5 @@
 
+import pathlib
 import random
 import time
 from collections.abc import Collection, Set
@@ -33,8 +34,27 @@ ROUTING_ENV_NAME: Final[str] = 'RoutingEnv'
 
 @dataclass
 class CheckpointConfig:
-    path: str
+    model_dir: str
     interval: int = field(default=25, kw_only=True)
+
+def is_checkpoint(path: str | pathlib.Path) -> bool:
+    if isinstance(path, str):
+        path = pathlib.Path(path)
+
+    return path.is_dir() and path.name.startswith('checkpoint')
+
+def get_checkpoint_iters(checkpoint_dir: str | pathlib.Path) -> int:
+    if isinstance(checkpoint_dir, str):
+        checkpoint_dir = pathlib.Path(checkpoint_dir)
+
+    return int(checkpoint_dir.name.removeprefix('checkpoint_'))
+
+def get_latest_checkpoint_dir(model_dir: str | pathlib.Path) -> pathlib.Path:
+    if isinstance(model_dir, str):
+        model_dir = pathlib.Path(model_dir)
+
+    return max((path for path in model_dir.iterdir() if path.is_dir()), key=get_checkpoint_iters)  # type: ignore
+
 
 class TrainingOrchestrator:
     algorithm: PPO
@@ -47,6 +67,7 @@ class TrainingOrchestrator:
         noise_generator: Optional[NoiseGenerator] = None,
         recalibration_interval: int = 32,
         episodes_per_circuit: int = 1,
+        checkpoint_config: Optional[CheckpointConfig] = None,
         lr: float = 1e-4,
         lr_schedule: Optional[list[list[int | float]]] = None,
         hidden_layers: Optional[list[int]] = None,
@@ -61,7 +82,6 @@ class TrainingOrchestrator:
         num_gpus: float = 0.0,
         num_workers: int = 2,
         envs_per_worker: int = 4,
-        checkpoint_config: Optional[CheckpointConfig] = None,
     ):
         if hidden_layers is None:
             hidden_layers = [64, 64]
@@ -145,13 +165,14 @@ class TrainingOrchestrator:
     @classmethod
     def from_checkpoint(
         cls,
-        checkpoint_path: str,
+        checkpoint_dir: str,
         env_creator: Factory[RoutingEnv],
         circuit_generator: CircuitGenerator,
         *,
         noise_generator: Optional[NoiseGenerator] = None,
         recalibration_interval: int = 32,
         episodes_per_circuit: int = 1,
+        checkpoint_config: Optional[CheckpointConfig] = None,
     ) -> Self:
         TrainingOrchestrator.register_routing_env(
             env_creator,
@@ -163,7 +184,9 @@ class TrainingOrchestrator:
 
         obj = cls.__new__(cls)
         super(TrainingOrchestrator, obj).__init__()
-        obj.algorithm = PPO.from_checkpoint(checkpoint_path)
+        obj.algorithm = PPO.from_checkpoint(checkpoint_dir)
+        obj.total_iters = get_checkpoint_iters(checkpoint_dir)
+        obj.checkpoint_config = checkpoint_config
 
         return obj
 
@@ -173,10 +196,10 @@ class TrainingOrchestrator:
             self.total_iters += 1
 
             if self.checkpoint_config is not None and self.total_iters % self.checkpoint_config.interval == 0:
-                self.algorithm.save(self.checkpoint_config.path)
+                self.algorithm.save(self.checkpoint_config.model_dir)
 
-    def save(self, path: str) -> str:
-        return self.algorithm.save(path)
+    def save(self, model_dir: str) -> str:
+        return self.algorithm.save(model_dir)
 
 
 class EvaluationOrchestrator:

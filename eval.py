@@ -15,8 +15,7 @@ def main():
     parser.add_argument('env_config', help='environment configuration file')
     parser.add_argument('eval_config', help='evaluation configuration file')
 
-    parser.add_argument('-c', '--checkpoint-path', metavar='P', default=argparse.SUPPRESS,
-                        help='path to model checkpoint')
+    parser.add_argument('-c', '--checkpoint-dir', metavar='P', required=True, help='path to model checkpoint')
     parser.add_argument('-i', '--evaluation-iters', metavar='N', type=int, default=argparse.SUPPRESS,
                         help='evaluation iterations per circuit')
     parser.add_argument('-r', '--routing-methods', nargs='+', choices=['basic', 'stochastic', 'sabre'],

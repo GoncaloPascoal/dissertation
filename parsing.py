@@ -97,12 +97,14 @@ def parse_generators(config: dict[str, Any]) -> tuple[CircuitGenerator, Optional
 
 
 def parse_train_config(
-    env_path: str,
-    train_path: str,
+    env_config_path: str,
+    train_config_path: str,
+    *,
+    checkpoint_dir: Optional[str] = None,
     override_args: Optional[dict[str, Any]] = None,
 ) -> TrainingOrchestrator:
-    env_creator = parse_env_config(env_path)
-    config = parse_yaml(train_path)
+    env_creator = parse_env_config(env_config_path)
+    config = parse_yaml(train_config_path)
 
     generators_config = config.pop('generators')
     circuit_generator, noise_generator = parse_generators(
@@ -122,18 +124,35 @@ def parse_train_config(
     )
     args.update(override_args)
 
-    return TrainingOrchestrator(**args)
+    if checkpoint_dir is None:
+        orchestrator = TrainingOrchestrator(**args)
+    else:
+        # Retain only environment or training-related args
+        args = {
+            k: v for k, v in args.items() if k in {
+                'env_creator', 'circuit_generator', 'noise_generator', 'recalibration_interval', 'episodes_per_circuit',
+                'checkpoint_config',
+            }
+        }
 
-def parse_eval_config(env_path: str, eval_path: str, override_args: Optional[dict[str, Any]] = None):
+        orchestrator = TrainingOrchestrator.from_checkpoint(checkpoint_dir, **args)
+
+    return orchestrator
+
+def parse_eval_config(
+    env_config_path: str,
+    eval_config_path: str,
+    checkpoint_dir: str,
+    *,
+    override_args: Optional[dict[str, Any]] = None,
+):
     if override_args is None:
         override_args = {}
 
-    env = parse_env_config(env_path)()
-    config = parse_yaml(eval_path)
+    env = parse_env_config(env_config_path)()
+    config = parse_yaml(eval_config_path)
 
-    checkpoint_path = config.pop('checkpoint_path', None)
-    checkpoint_path = override_args.pop('checkpoint_path', checkpoint_path)
-    policy = Policy.from_checkpoint(checkpoint_path)['default_policy']
+    policy = Policy.from_checkpoint(checkpoint_dir)['default_policy']
 
     generators_config = config.pop('generators')
     circuit_generator, noise_generator = parse_generators(
