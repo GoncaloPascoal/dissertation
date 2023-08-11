@@ -2,6 +2,7 @@
 import random
 import time
 from collections.abc import Collection, Set
+from dataclasses import dataclass, field
 from math import inf
 from numbers import Real
 from typing import Optional, Self, cast, Final
@@ -30,6 +31,11 @@ from utils import reliability, Factory
 ROUTING_ENV_NAME: Final[str] = 'RoutingEnv'
 
 
+@dataclass
+class CheckpointConfig:
+    path: str
+    interval: int = field(default=25, kw_only=True)
+
 class TrainingOrchestrator:
     algorithm: PPO
 
@@ -42,6 +48,7 @@ class TrainingOrchestrator:
         recalibration_interval: int = 32,
         episodes_per_circuit: int = 1,
         lr: float = 1e-4,
+        lr_schedule: Optional[list[list[int | float]]] = None,
         hidden_layers: Optional[list[int]] = None,
         activation_fn: str = 'silu',
         batch_size: int = 8192,
@@ -54,26 +61,24 @@ class TrainingOrchestrator:
         num_gpus: float = 0.0,
         num_workers: int = 2,
         envs_per_worker: int = 4,
+        checkpoint_config: Optional[CheckpointConfig] = None,
     ):
         if hidden_layers is None:
             hidden_layers = [64, 64]
 
-        # TODO: potentially refactor into env-specific generators
-        def create_env(_context: EnvContext) -> TrainingWrapper:
-            return TrainingWrapper(
-                env_creator(),
-                circuit_generator,
-                noise_generator=noise_generator,
-                recalibration_interval=recalibration_interval,
-                episodes_per_circuit=episodes_per_circuit,
-            )
-
-        register_env(ROUTING_ENV_NAME, create_env)
+        TrainingOrchestrator.register_routing_env(
+            env_creator,
+            circuit_generator,
+            noise_generator=noise_generator,
+            recalibration_interval=recalibration_interval,
+            episodes_per_circuit=episodes_per_circuit,
+        )
 
         config = (
             PPOConfig()
             .training(
                 lr=lr,
+                lr_schedule=lr_schedule,
                 model=dict(
                     custom_model=ActionMaskModel,
                     fcnet_hiddens=hidden_layers,
@@ -113,17 +118,62 @@ class TrainingOrchestrator:
         )
 
         self.algorithm = config.build()
+        self.checkpoint_config = checkpoint_config
+        self.total_iters = 0
+
+    @staticmethod
+    def register_routing_env(
+        env_creator: Factory[RoutingEnv],
+        circuit_generator: CircuitGenerator,
+        *,
+        noise_generator: Optional[NoiseGenerator] = None,
+        recalibration_interval: int = 32,
+        episodes_per_circuit: int = 1,
+    ):
+        # TODO: potentially refactor into env-specific generators
+        def create_env(_context: EnvContext) -> TrainingWrapper:
+            return TrainingWrapper(
+                env_creator(),
+                circuit_generator,
+                noise_generator=noise_generator,
+                recalibration_interval=recalibration_interval,
+                episodes_per_circuit=episodes_per_circuit,
+            )
+
+        register_env(ROUTING_ENV_NAME, create_env)
 
     @classmethod
-    def from_checkpoint(cls, path: str) -> Self:
+    def from_checkpoint(
+        cls,
+        checkpoint_path: str,
+        env_creator: Factory[RoutingEnv],
+        circuit_generator: CircuitGenerator,
+        *,
+        noise_generator: Optional[NoiseGenerator] = None,
+        recalibration_interval: int = 32,
+        episodes_per_circuit: int = 1,
+    ) -> Self:
+        TrainingOrchestrator.register_routing_env(
+            env_creator,
+            circuit_generator,
+            noise_generator=noise_generator,
+            recalibration_interval=recalibration_interval,
+            episodes_per_circuit=episodes_per_circuit,
+        )
+
         obj = cls.__new__(cls)
         super(TrainingOrchestrator, obj).__init__()
-        obj.algorithm = PPO.from_checkpoint(path)
+        obj.algorithm = PPO.from_checkpoint(checkpoint_path)
+
         return obj
 
     def train(self, iters: int):
         for _ in range(iters):
             self.algorithm.train()
+            self.total_iters += 1
+
+            if self.checkpoint_config is not None and self.total_iters % self.checkpoint_config.interval == 0:
+                self.algorithm.save(self.checkpoint_config.path)
 
     def save(self, path: str) -> str:
         return self.algorithm.save(path)

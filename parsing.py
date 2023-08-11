@@ -11,7 +11,7 @@ from routing.circuit_gen import (
 )
 from routing.env import CircuitMatrix, ObsModule, QubitInteractions, RoutingEnv
 from routing.noise import NoiseConfig, UniformNoiseGenerator, NoiseGenerator, KdeNoiseGenerator
-from routing.orchestration import TrainingOrchestrator, EvaluationOrchestrator
+from routing.orchestration import TrainingOrchestrator, EvaluationOrchestrator, CheckpointConfig
 from routing.topology import t_topology, h_topology, grid_topology, linear_topology, ibm_16q_topology, ibm_27q_topology
 
 OBS_MODULES: Final[dict[str, type[ObsModule]]] = {
@@ -109,10 +109,15 @@ def parse_train_config(
         parse_yaml(generators_config) if isinstance(generators_config, str) else generators_config
     )
 
+    checkpoint_config = config.pop('checkpoint_config', None)
+    if checkpoint_config is not None:
+        checkpoint_config = CheckpointConfig(**checkpoint_config)
+
     args = dict(
         env_creator=env_creator,
         circuit_generator=circuit_generator,
         noise_generator=noise_generator,
+        checkpoint_config=checkpoint_config,
         **config,
     )
     args.update(override_args)
