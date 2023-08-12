@@ -43,9 +43,6 @@ class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
         recalibration_interval: int = 64,
         episodes_per_circuit: int = 1,
     ):
-        if (noise_generator is not None) != env.noise_aware:
-            raise ValueError('Noise-awareness mismatch between wrapper and env')
-
         if recalibration_interval <= 0:
             raise ValueError(f'Recalibration interval must be positive, got {recalibration_interval}')
 
@@ -69,7 +66,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
         if self.current_iter % self.episodes_per_circuit == 0:
             self.env.circuit = self.circuit_generator.generate()
 
-        if self.noise_aware and self.current_iter % self.recalibration_interval == 0:
+        if self.env.noise_aware and self.current_iter % self.recalibration_interval == 0:
             error_rates = self.noise_generator.generate_error_rates(self.env.num_edges)
             self.env.calibrate(error_rates)
 

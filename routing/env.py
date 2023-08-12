@@ -461,13 +461,13 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         if self.noise_aware:
             return self.edge_to_log_reliability[edge] + self.noise_config.added_gate_reward
 
-        return 1.0
+        return 0.01
 
     def _swap_reward(self, edge: tuple[int, int]) -> float:
         if self.noise_aware:
             return 3.0 * self.edge_to_log_reliability[edge]
 
-        return -3.0
+        return -0.03
 
     def _bridge_reward(self, control: int, middle: int, target: int) -> float:
         if self.noise_aware:
@@ -476,7 +476,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
                 self.edge_to_log_reliability[(control, middle)]
             ) + self.noise_config.added_gate_reward
 
-        return -2.0
+        return -0.02
 
     def _reset_state(self):
         self.node_to_qubit = self.initial_mapping.copy()
