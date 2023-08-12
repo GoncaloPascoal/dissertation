@@ -32,8 +32,9 @@ def main():
 
     env_config = args.pop('env_config')
     eval_config = args.pop('eval_config')
+    checkpoint_dir = args.pop('checkpoint_dir')
 
-    orchestrator = parse_eval_config(env_config, eval_config, override_args=args)
+    orchestrator = parse_eval_config(env_config, eval_config, checkpoint_dir, override_args=args)
     orchestrator.evaluate()
 
 
