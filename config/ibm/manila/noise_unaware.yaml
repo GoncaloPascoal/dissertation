@@ -1,0 +1,12 @@
+
+coupling_map:
+  type: 'linear'
+  args:
+    num_qubits: 5
+
+obs_modules:
+  - type: 'circuit_matrix'
+    args:
+      depth: 8
+
+noise_config: null
