@@ -25,6 +25,10 @@ def main():
                         help='number of (random) evaluation circuits')
     parser.add_argument('--use-tqdm', action='store_const', const=True, default=argparse.SUPPRESS,
                         help='show a progress bar using tqdm')
+    parser.add_argument('--stochastic', action='store_true', default=argparse.SUPPRESS,
+                        help='Use stochastic policy')
+    parser.add_argument('--deterministic', action='store_false', dest='stochastic', default=argparse.SUPPRESS,
+                        help='Use deterministic policy (evaluation_iters will be set to 1)')
 
     args = vars(parser.parse_args())
 

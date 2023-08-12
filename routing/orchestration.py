@@ -216,6 +216,7 @@ class EvaluationOrchestrator:
         circuit_generator: CircuitGenerator,
         *,
         noise_generator: Optional[NoiseGenerator] = None,
+        stochastic: bool = True,
         evaluation_iters: int = 10,
         num_circuits: Optional[int] = None,
         routing_methods: str | Collection[str] = 'sabre',
@@ -230,6 +231,12 @@ class EvaluationOrchestrator:
 
         if num_circuits <= 0:
             raise ValueError(f'Number of evaluation circuits must be positive, got {num_circuits}')
+
+        if not stochastic:
+            evaluation_iters = 1
+
+        if evaluation_iters <= 0:
+            raise ValueError(f'Evaluation iterations must be positive, got {evaluation_iters}')
 
         if seed is not None:
             random.seed(seed)
@@ -248,6 +255,7 @@ class EvaluationOrchestrator:
             evaluation_iters=evaluation_iters,
         )
 
+        self.stochastic = stochastic
         self.num_circuits = num_circuits
         self.routing_methods = [routing_methods] if isinstance(routing_methods, str) else list(routing_methods)
         self.use_tqdm = use_tqdm
@@ -311,7 +319,7 @@ class EvaluationOrchestrator:
                 total_reward = 0.0
 
                 while not terminated:
-                    action, *_ = self.policy.compute_single_action(obs)
+                    action, *_ = self.policy.compute_single_action(obs, explore=self.stochastic)
                     obs, reward, terminated, *_ = self.eval_env.step(action)
                     total_reward += reward
 
