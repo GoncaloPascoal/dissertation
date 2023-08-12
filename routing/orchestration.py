@@ -65,7 +65,7 @@ class TrainingOrchestrator:
         circuit_generator: CircuitGenerator,
         *,
         noise_generator: Optional[NoiseGenerator] = None,
-        recalibration_interval: int = 32,
+        recalibration_interval: int = 64,
         episodes_per_circuit: int = 1,
         checkpoint_config: Optional[CheckpointConfig] = None,
         lr: float = 1e-4,
@@ -150,7 +150,7 @@ class TrainingOrchestrator:
         circuit_generator: CircuitGenerator,
         *,
         noise_generator: Optional[NoiseGenerator] = None,
-        recalibration_interval: int = 32,
+        recalibration_interval: int = 64,
         episodes_per_circuit: int = 1,
     ):
         # TODO: potentially refactor into env-specific generators
@@ -173,7 +173,7 @@ class TrainingOrchestrator:
         circuit_generator: CircuitGenerator,
         *,
         noise_generator: Optional[NoiseGenerator] = None,
-        recalibration_interval: int = 32,
+        recalibration_interval: int = 64,
         episodes_per_circuit: int = 1,
         checkpoint_config: Optional[CheckpointConfig] = None,
     ) -> Self:
@@ -255,7 +255,7 @@ class EvaluationOrchestrator:
 
         self.env = self.eval_env.env
         self.initial_layout = env.qubit_to_node.tolist()
-        self.qiskit_coupling_map = CouplingMap(env.coupling_map.to_directed().edge_list())
+        self.qiskit_coupling_map = CouplingMap(env.coupling_map.to_directed().edge_list())  # type: ignore
 
         self.reliability_map = {}
         for edge, edge_reliability in zip(env.coupling_map.edge_list(), 1.0 - env.error_rates):  # type: ignore

@@ -40,7 +40,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
         noise_generator: Optional[NoiseGenerator] = None,
-        recalibration_interval: int = 32,
+        recalibration_interval: int = 64,
         episodes_per_circuit: int = 1,
     ):
         if (noise_generator is not None) != env.noise_aware:

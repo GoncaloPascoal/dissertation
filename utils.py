@@ -8,7 +8,6 @@ from qiskit import QuantumCircuit
 from qiskit.circuit import Qubit, Gate
 from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 
-
 _T = TypeVar('_T')
 Factory: TypeAlias = Callable[[], _T]
 
