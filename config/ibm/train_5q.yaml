@@ -15,6 +15,7 @@ generators:
 hidden_layers: [96, 96, 96]
 minibatch_size: 512
 batch_size: 8192
+sgd_iters: 5
 lr_schedule:
     - [0, 3.0e-4]
     - [491_520, 1.0e-4]
