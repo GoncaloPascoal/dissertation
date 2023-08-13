@@ -22,6 +22,7 @@ class ActionMaskModel(TorchModelV2, nn.Module):
         num_outputs: int,
         model_config: ModelConfigDict,
         name: str,
+        **kwargs,
     ):
         if hasattr(obs_space, 'original_space'):
             original_space: spaces.Dict = obs_space.original_space
@@ -43,9 +44,7 @@ class ActionMaskModel(TorchModelV2, nn.Module):
         TorchModelV2.__init__(self, obs_space, action_space, num_outputs, model_config, name)
         nn.Module.__init__(self)
 
-        custom_model_config = model_config['custom_model_config']
-
-        embedding_dim = custom_model_config.get('embedding_dim')
+        embedding_dim = kwargs.get('embedding_dim')
         if 'circuit_matrix' in true_obs_space.spaces and embedding_dim is not None:
             circuit_matrix = cast(spaces.Box, true_obs_space['circuit_matrix'])
             self.embedding = nn.Embedding(circuit_matrix.shape[0] + 1, embedding_dim)
