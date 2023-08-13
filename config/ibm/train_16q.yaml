@@ -14,7 +14,8 @@ generators:
       seed: 0
 
 # Model
-hidden_layers: [128, 128]
+hidden_layers: [256, 256, 256]
+embedding_dim: 2
 minibatch_size: 2048
 batch_size: 32768
 sgd_iters: 15

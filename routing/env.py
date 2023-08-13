@@ -562,11 +562,11 @@ class CircuitMatrix(ObsModule):
         return 'circuit_matrix'
 
     def space(self, env: RoutingEnv) -> spaces.Box:
-        return spaces.Box(-1, env.num_qubits - 1, (env.num_qubits, self.depth), dtype=np.int32)
+        return spaces.Box(0, env.num_qubits, (env.num_qubits, self.depth), dtype=np.int32)
 
     def obs(self, env: RoutingEnv) -> NDArray:
         space = self.space(env)
-        circuit = np.full(space.shape, -1, dtype=space.dtype)
+        circuit = np.full(space.shape, 0, dtype=space.dtype)
 
         layer_idx = 0
         layer_qubits = set()
@@ -585,8 +585,8 @@ class CircuitMatrix(ObsModule):
 
             idx_a, idx_b = indices
 
-            circuit[idx_a, layer_idx] = env.qubit_to_node[idx_b]
-            circuit[idx_b, layer_idx] = env.qubit_to_node[idx_a]
+            circuit[idx_a, layer_idx] = env.qubit_to_node[idx_b] + 1
+            circuit[idx_b, layer_idx] = env.qubit_to_node[idx_a] + 1
 
         mapped_circuit = np.zeros_like(circuit)
         for q in range(env.num_qubits):

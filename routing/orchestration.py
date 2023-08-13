@@ -72,6 +72,7 @@ class TrainingOrchestrator:
         lr_schedule: Optional[list[list[int | float]]] = None,
         hidden_layers: Optional[list[int]] = None,
         activation_fn: str = 'silu',
+        embedding_dim: Optional[int] = None,
         batch_size: int = 8192,
         minibatch_size: int = 128,
         sgd_iters: int = 10,
@@ -101,6 +102,9 @@ class TrainingOrchestrator:
                 lr_schedule=lr_schedule,
                 model=dict(
                     custom_model=ActionMaskModel,
+                    custom_model_config=dict(
+                        embedding_dim=embedding_dim,
+                    ),
                     fcnet_hiddens=hidden_layers,
                     fcnet_activation=activation_fn,
                 ),
