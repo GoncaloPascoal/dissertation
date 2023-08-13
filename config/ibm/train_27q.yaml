@@ -17,7 +17,7 @@ generators:
 hidden_layers: [256, 256]
 minibatch_size: 2048
 batch_size: 32768
-sgd_iters: 5
+sgd_iters: 15
 lr: 5.0e-5
 
 # Resources
