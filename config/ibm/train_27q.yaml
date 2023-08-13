@@ -3,8 +3,8 @@ generators:
   circuit:
     type: 'random'
     args:
-      num_qubits: 16
-      num_gates: 192
+      num_qubits: 27
+      num_gates: 128
       seed: 0
   noise:
     type: 'uniform'
@@ -14,11 +14,11 @@ generators:
       seed: 0
 
 # Model
-hidden_layers: [256, 256, 256]
-minibatch_size: 1536
-batch_size: 24576
+hidden_layers: [256, 256]
+minibatch_size: 2048
+batch_size: 32768
 sgd_iters: 5
-lr: 3.0e-4
+lr: 5.0e-5
 
 # Resources
 num_workers: 18

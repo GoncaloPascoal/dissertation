@@ -14,11 +14,11 @@ generators:
       seed: 0
 
 # Model
-hidden_layers: [256, 256, 256]
-minibatch_size: 1024
-batch_size: 16384
+hidden_layers: [128, 128]
+minibatch_size: 2048
+batch_size: 32768
 sgd_iters: 5
-lr: 3.0e-4
+lr: 5.0e-5
 
 # Resources
 num_workers: 18
