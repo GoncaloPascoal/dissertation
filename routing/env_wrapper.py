@@ -3,18 +3,11 @@ from typing import Optional, Any
 
 import gymnasium as gym
 import numpy as np
-from nptyping import NDArray
 from qiskit import transpile
 
 from routing.circuit_gen import CircuitGenerator
 from routing.env import RoutingEnv, RoutingObs
 from routing.noise import NoiseGenerator
-
-
-def _generate_random_mapping(num_qubits: int) -> NDArray:
-    mapping = np.arange(num_qubits)
-    np.random.shuffle(mapping)
-    return mapping
 
 
 class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
@@ -51,6 +44,8 @@ class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
         self.recalibration_interval = recalibration_interval
         self.episodes_per_circuit = episodes_per_circuit
 
+        env.initial_mapping = np.arange(env.num_qubits)
+
         super().__init__(env)
 
         self.current_iter = 0
@@ -61,8 +56,6 @@ class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
         seed: Optional[int] = None,
         options: Optional[dict[str, Any]] = None,
     ) -> tuple[RoutingObs, dict[str, Any]]:
-        self.env.initial_mapping = _generate_random_mapping(self.num_qubits)
-
         if self.current_iter % self.episodes_per_circuit == 0:
             self.env.circuit = self.circuit_generator.generate()
 
@@ -103,7 +96,7 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
 
         if noise_generator is not None:
             env.calibrate(noise_generator.generate_error_rates(env.num_edges))
-        env.initial_mapping = _generate_random_mapping(env.num_qubits)
+        env.initial_mapping = np.arange(env.num_qubits)
 
         super().__init__(env)
 
