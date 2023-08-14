@@ -1,9 +1,12 @@
 
 import functools
 import operator
+import random
 from collections.abc import Callable
 from typing import Iterable, TypeVar, TypeAlias
 
+import numpy as np
+import torch
 from qiskit import QuantumCircuit
 from qiskit.circuit import Qubit, Gate
 from qiskit.dagcircuit import DAGCircuit, DAGOpNode
@@ -47,3 +50,9 @@ def dag_layers(dag: DAGCircuit) -> list[list[DAGOpNode]]:
         layers.append(layer)
 
     return layers
+
+
+def seed_default_generators(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)

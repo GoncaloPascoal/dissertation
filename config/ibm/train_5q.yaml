@@ -5,16 +5,16 @@ generators:
     args:
       num_qubits: 5
       num_gates: 64
-      seed: 0
   noise:
     type: 'uniform'
     args:
       mean: 1.0e-2
       std: 3.0e-3
-      seed: 0
+
+seed: 0
 
 # Model
-hidden_layers: [96, 96, 96]
+hidden_layers: [128, 128]
 embedding_dim: 2
 minibatch_size: 512
 batch_size: 8192

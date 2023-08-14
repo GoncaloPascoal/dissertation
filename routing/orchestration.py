@@ -1,6 +1,7 @@
 
+import copy
+import ctypes
 import pathlib
-import random
 import time
 from collections.abc import Collection, Set
 from dataclasses import dataclass, field
@@ -9,10 +10,8 @@ from numbers import Real
 from typing import Optional, Self, cast, Final
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import seaborn as sns
-import torch
 from qiskit import QuantumCircuit, transpile
 from qiskit.transpiler import CouplingMap
 from ray.rllib import Policy
@@ -27,7 +26,7 @@ from routing.circuit_gen import CircuitGenerator, DatasetCircuitGenerator
 from routing.env import RoutingEnv
 from routing.env_wrapper import TrainingWrapper, EvaluationWrapper
 from routing.noise import NoiseGenerator
-from utils import reliability, Factory
+from utils import reliability, Factory, seed_default_generators
 
 ROUTING_ENV_NAME: Final[str] = 'RoutingEnv'
 
@@ -68,6 +67,7 @@ class TrainingOrchestrator:
         recalibration_interval: int = 64,
         episodes_per_circuit: int = 1,
         checkpoint_config: Optional[CheckpointConfig] = None,
+        gamma: float = 0.99,
         lr: float = 1e-4,
         lr_schedule: Optional[list[list[int | float]]] = None,
         hidden_layers: Optional[list[int]] = None,
@@ -78,6 +78,7 @@ class TrainingOrchestrator:
         sgd_iters: int = 10,
         vf_loss_coeff: float = 0.5,
         entropy_coeff: float = 0.0,
+        seed: Optional[int] = None,
         evaluation_interval: Optional[int] = None,
         evaluation_duration: int = 256,
         num_gpus: float = 0.0,
@@ -86,6 +87,9 @@ class TrainingOrchestrator:
     ):
         if hidden_layers is None:
             hidden_layers = [64, 64]
+
+        if seed is not None:
+            seed_default_generators(seed)
 
         TrainingOrchestrator.register_routing_env(
             env_creator,
@@ -98,6 +102,7 @@ class TrainingOrchestrator:
         config = (
             PPOConfig()
             .training(
+                gamma=gamma,
                 lr=lr,
                 lr_schedule=lr_schedule,
                 model=dict(
@@ -119,8 +124,11 @@ class TrainingOrchestrator:
                 _enable_learner_api=False,
             )
             .callbacks(RoutingCallbacks)
-            .debugging(log_level='ERROR')
-            .environment(env=ROUTING_ENV_NAME)
+            .debugging(log_level='ERROR', seed=seed)
+            .environment(
+                env=ROUTING_ENV_NAME,
+                env_config=dict(seed=seed),
+            )
             .evaluation(
                 evaluation_interval=evaluation_interval,
                 evaluation_duration=evaluation_duration,
@@ -157,12 +165,25 @@ class TrainingOrchestrator:
         recalibration_interval: int = 64,
         episodes_per_circuit: int = 1,
     ):
-        # TODO: potentially refactor into env-specific generators
-        def create_env(_context: EnvContext) -> TrainingWrapper:
+        def create_env(context: EnvContext) -> TrainingWrapper:
+            seed = context.get('seed')
+
+            if seed is not None:
+                seed = ctypes.c_size_t(hash((seed, context.worker_index, context.vector_index))).value
+
+                env_circuit_generator = copy.deepcopy(circuit_generator)
+                env_circuit_generator.seed(seed)
+
+                env_noise_generator = copy.deepcopy(noise_generator)
+                env_noise_generator.seed(seed)
+            else:
+                env_circuit_generator = circuit_generator
+                env_noise_generator = noise_generator
+
             return TrainingWrapper(
                 env_creator(),
-                circuit_generator,
-                noise_generator=noise_generator,
+                env_circuit_generator,
+                noise_generator=env_noise_generator,
                 recalibration_interval=recalibration_interval,
                 episodes_per_circuit=episodes_per_circuit,
             )
@@ -243,9 +264,7 @@ class EvaluationOrchestrator:
             raise ValueError(f'Evaluation iterations must be positive, got {evaluation_iters}')
 
         if seed is not None:
-            random.seed(seed)
-            np.random.seed(seed)
-            torch.manual_seed(seed)
+            seed_default_generators(seed)
 
             circuit_generator.seed(seed)
             if noise_generator is not None:
