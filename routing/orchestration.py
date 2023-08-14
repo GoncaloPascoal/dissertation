@@ -70,6 +70,7 @@ class TrainingOrchestrator:
         gamma: float = 0.99,
         lr: float = 1e-4,
         lr_schedule: Optional[list[list[int | float]]] = None,
+        gae_lambda: float = 0.95,
         hidden_layers: Optional[list[int]] = None,
         activation_fn: str = 'silu',
         embedding_dim: Optional[int] = None,
@@ -80,7 +81,7 @@ class TrainingOrchestrator:
         entropy_coeff: float = 0.0,
         seed: Optional[int] = None,
         evaluation_interval: Optional[int] = None,
-        evaluation_duration: int = 256,
+        evaluation_duration: int = 128,
         num_gpus: float = 0.0,
         num_workers: int = 2,
         envs_per_worker: int = 4,
@@ -114,7 +115,7 @@ class TrainingOrchestrator:
                     fcnet_activation=activation_fn,
                 ),
                 train_batch_size=batch_size,
-                lambda_=0.95,
+                lambda_=gae_lambda,
                 sgd_minibatch_size=minibatch_size,
                 num_sgd_iter=sgd_iters,
                 vf_loss_coeff=vf_loss_coeff,
@@ -369,7 +370,11 @@ class EvaluationOrchestrator:
                 self.log_circuit_metrics(method, original_circuit, routed_circuit, exclude={'bridge_count'})
 
     def metric_as_df(self, metric: str) -> pd.DataFrame:
-        return pd.DataFrame({method: method_data.get(metric, []) for method, method_data in self.metrics.items()})
+        return pd.DataFrame({
+            method: method_data.get(metric, [])
+            for method, method_data in self.metrics.items()
+            if metric in method_data
+        })
 
     def box_plot(self, metric: str):
         sns.boxplot(self.metric_as_df(metric))
