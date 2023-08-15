@@ -170,13 +170,13 @@ class TrainingOrchestrator:
             seed = context.get('seed')
 
             if seed is not None:
-                seed = ctypes.c_size_t(hash((seed, context.worker_index, context.vector_index))).value
+                env_seed = ctypes.c_size_t(hash((seed, context.worker_index, context.vector_index))).value
 
                 env_circuit_generator = copy.deepcopy(circuit_generator)
-                env_circuit_generator.seed(seed)
+                env_circuit_generator.seed(env_seed)
 
                 env_noise_generator = copy.deepcopy(noise_generator)
-                env_noise_generator.seed(seed)
+                env_noise_generator.seed(env_seed)
             else:
                 env_circuit_generator = circuit_generator
                 env_noise_generator = noise_generator

@@ -32,21 +32,27 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
 
     :param coupling_map: Graph representing the connectivity of the target device.
     :param circuit: Quantum circuit to compile. This argument is optional during environment construction but a valid
-                    circuit must be assigned before the :py:meth:`reset` method is called.
+        circuit must be assigned before the :py:meth:`reset` method is called.
     :param initial_mapping: Initial mapping from physical nodes to logical qubits. If ``None``, a random initial mapping
-                            will be used for each training iteration.
+        will be used for each training iteration.
     :param allow_bridge_gate: Allow the use of BRIDGE gates when routing.
     :param commutation_analysis: Use commutation rules to schedule additional gates at each time step.
     :param error_rates: Array of two-qubit gate error rates.
     :param noise_config: Allows configuration of rewards in noise-aware environments. If ``None``, routing will be
-                         noise-unaware.
+        noise-unaware.
     :param obs_modules: Observation modules that define the key-value pairs in observations.
+    :param log_metrics: Log additional metrics when training, such as the number of SWAP and BRIDGE gates used in each
+        episode.
 
     :ivar node_to_qubit: Current mapping from physical nodes to logical qubits.
     :ivar qubit_to_node: Current mapping from logical qubits to physical nodes.
     :ivar routed_gates: List of already routed gates, including additional SWAP and BRIDGE operations.
     :ivar log_reliabilities: Array of logarithms of two-qubit gate reliabilities (``reliability = 1 - error_rate``)
-    :ivar edge_to_log_reliability: Dictionary that maps edges to their corresponding log reliability values.
+    :ivar added_gate_reward: Reward for scheduling a two-qubit gate from the original circuit. Used only in
+        noise-aware environments.
+    :ivar edge_to_log_reliability: Mapping of edges to their corresponding log reliability values.
+    :ivar edge_to_reliability: Mapping of edges to their corresponding reliability values.
+    :ivar pair_to_bridge_args: Mapping of qubit pairs to arguments required to perform a BRIDGE operation.
     """
 
     observation_space: spaces.Dict
@@ -60,6 +66,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
     routed_op_nodes: set[DAGOpNode]
 
     log_reliabilities: NDArray
+    added_gate_reward: float
     edge_to_log_reliability: dict[tuple[int, int], float]
     edge_to_reliability: dict[tuple[int, int], float]
 
@@ -286,21 +293,18 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         :param error_rates: Array of two-qubit gate error rates.
         """
         self.error_rates = error_rates.copy()
+
         if self.noise_config is not None:
             self.log_reliabilities = self.noise_config.calculate_log_reliabilities(error_rates)
+            self.added_gate_reward = abs(np.min(self.log_reliabilities)) + 0.01
 
-            self.edge_to_log_reliability = {}
-            for edge, log_reliability in zip(self.edge_list, self.log_reliabilities):
+            self.edge_to_reliability, self.edge_to_log_reliability = {}, {}
+            for edge, reliability, log_reliability in zip(self.edge_list, 1.0 - error_rates, self.log_reliabilities):
+                self.edge_to_reliability[edge] = reliability
+                self.edge_to_reliability[edge[::-1]] = reliability
+
                 self.edge_to_log_reliability[edge] = log_reliability
                 self.edge_to_log_reliability[edge[::-1]] = log_reliability
-
-            if self.log_metrics:
-                # Only need non-log reliabilities for calculating additional metrics
-                reliabilities = 1.0 - error_rates
-                self.edge_to_reliability = {}
-                for edge, reliability in zip(self.edge_list, reliabilities):
-                    self.edge_to_reliability[edge] = reliability
-                    self.edge_to_reliability[edge[::-1]] = reliability
 
     def copy(self) -> Self:
         """
@@ -459,7 +463,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
 
     def _gate_reward(self, edge: tuple[int, int]) -> float:
         if self.noise_aware:
-            return self.edge_to_log_reliability[edge] + self.noise_config.added_gate_reward
+            return self.edge_to_log_reliability[edge] + self.added_gate_reward
 
         return 0.01
 
@@ -474,7 +478,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             return 2.0 * (
                 self.edge_to_log_reliability[(middle, target)] +
                 self.edge_to_log_reliability[(control, middle)]
-            ) + self.noise_config.added_gate_reward
+            ) + self.added_gate_reward
 
         return -0.02
 
