@@ -296,7 +296,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
 
         if self.noise_config is not None:
             self.log_reliabilities = self.noise_config.calculate_log_reliabilities(error_rates)
-            self.added_gate_reward = abs(np.min(self.log_reliabilities)) + 0.01
+            self.added_gate_reward = abs(np.min(self.log_reliabilities)) + self.noise_config.added_gate_reward
 
             self.edge_to_reliability, self.edge_to_log_reliability = {}, {}
             for edge, reliability, log_reliability in zip(self.edge_list, 1.0 - error_rates, self.log_reliabilities):
@@ -513,6 +513,7 @@ class CircuitMatrixRoutingEnv(RoutingEnv):
         restrict_swaps_to_front_layer: bool = True,
         error_rates: Optional[ArrayLike] = None,
         noise_config: Optional[NoiseConfig] = None,
+        log_metrics: bool = False,
     ):
         super().__init__(
             coupling_map,
@@ -524,6 +525,7 @@ class CircuitMatrixRoutingEnv(RoutingEnv):
             error_rates=error_rates,
             noise_config=noise_config,
             obs_modules=[CircuitMatrix(depth)],
+            log_metrics=log_metrics,
         )
 
 
