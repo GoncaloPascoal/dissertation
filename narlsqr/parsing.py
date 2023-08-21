@@ -6,13 +6,12 @@ import rustworkx as rx
 import yaml
 from ray.rllib import Policy
 
-from routing.circuit_gen import (
-    CircuitGenerator, RandomCircuitGenerator, LayeredCircuitGenerator, DatasetCircuitGenerator
-)
-from routing.env import CircuitMatrix, ObsModule, QubitInteractions, RoutingEnv
-from routing.noise import NoiseConfig, UniformNoiseGenerator, NoiseGenerator, KdeNoiseGenerator
-from routing.orchestration import TrainingOrchestrator, EvaluationOrchestrator, CheckpointConfig
-from routing.topology import t_topology, h_topology, grid_topology, linear_topology, ibm_16q_topology, ibm_27q_topology
+from narlsqr.env import CircuitMatrix, NoiseConfig, ObsModule, QubitInteractions, RoutingEnv
+from narlsqr.generators.circuit import (CircuitGenerator, DatasetCircuitGenerator, LayeredCircuitGenerator,
+                                        RandomCircuitGenerator)
+from narlsqr.generators.noise import KdeNoiseGenerator, NoiseGenerator, UniformNoiseGenerator
+from narlsqr.orchestration import CheckpointConfig, EvaluationOrchestrator, TrainingOrchestrator
+from narlsqr.topology import grid_topology, h_topology, ibm_16q_topology, ibm_27q_topology, linear_topology, t_topology
 
 OBS_MODULES: Final[dict[str, type[ObsModule]]] = {
     'circuit_matrix': CircuitMatrix,
@@ -37,7 +36,9 @@ CIRCUIT_GENERATORS: Final[dict[str, Callable[..., CircuitGenerator]]] = {
 NOISE_GENERATORS: Final[dict[str, Callable[..., NoiseGenerator]]] = {
     'uniform': UniformNoiseGenerator,
     'uniform_samples': UniformNoiseGenerator.from_samples,
+    'uniform_calibration': UniformNoiseGenerator.from_calibration_file,
     'kde': KdeNoiseGenerator,
+    'kde_calibration': KdeNoiseGenerator.from_calibration_file,
 }
 
 
@@ -60,7 +61,6 @@ def parse_env_config(path: str) -> Callable[[], RoutingEnv]:
     else:
         raise ValueError(f'Coupling map configuration has invalid type `{type(coupling_map_config)}`')
 
-    # Can make environment noise-unaware by assigning null to noise_config
     noise_config_args = config.pop('noise_config', {})
     noise_config = None if noise_config_args is None else NoiseConfig(**noise_config_args)
 
@@ -85,15 +85,18 @@ def parse_env_config(path: str) -> Callable[[], RoutingEnv]:
     return create_env
 
 
-def parse_generators(config: dict[str, Any]) -> tuple[CircuitGenerator, Optional[NoiseGenerator]]:
+def parse_generators(config: dict[str, Any], env: RoutingEnv) -> tuple[CircuitGenerator, NoiseGenerator]:
     circuit_config = config.pop('circuit')
-    noise_config = config.pop('noise', None)
+    noise_config = config.pop('noise')
 
-    circuit_generator = CIRCUIT_GENERATORS[circuit_config['type']](**circuit_config['args'])
+    cg_args: dict[str, Any] = circuit_config['args']
+    ng_args: dict[str, Any] = noise_config['args']
 
-    noise_generator = None
-    if noise_config is not None:
-        noise_generator = NOISE_GENERATORS[noise_config['type']](**noise_config['args'])
+    cg_args['num_qubits'] = env.num_qubits
+    ng_args['num_edges'] = env.num_edges
+
+    circuit_generator = CIRCUIT_GENERATORS[circuit_config['type']](**cg_args)
+    noise_generator = NOISE_GENERATORS[noise_config['type']](**ng_args)
 
     return circuit_generator, noise_generator
 
@@ -109,9 +112,7 @@ def parse_train_config(
     config = parse_yaml(train_config_path)
 
     generators_config = config.pop('generators')
-    circuit_generator, noise_generator = parse_generators(
-        parse_yaml(generators_config) if isinstance(generators_config, str) else generators_config
-    )
+    circuit_generator, noise_generator = parse_generators(generators_config, env_creator())
 
     checkpoint_config = config.pop('checkpoint_config', None)
     if checkpoint_config is not None:
@@ -157,9 +158,7 @@ def parse_eval_config(
     policy = Policy.from_checkpoint(checkpoint_dir)['default_policy']
 
     generators_config = config.pop('generators')
-    circuit_generator, noise_generator = parse_generators(
-        parse_yaml(generators_config) if isinstance(generators_config, str) else generators_config
-    )
+    circuit_generator, noise_generator = parse_generators(generators_config, env)
 
     args = dict(
         policy=policy,

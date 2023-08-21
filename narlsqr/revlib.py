@@ -5,9 +5,8 @@ from pathlib import Path
 from typing import Optional, TypeAlias
 
 from qiskit import QuantumCircuit, transpile
-from qiskit.circuit.library import MCXGate, SwapGate, SXGate, SXdgGate, XGate
+from qiskit.circuit.library import MCXGate, SXGate, SXdgGate, SwapGate, XGate
 from tqdm.rich import tqdm
-
 
 RealHeader: TypeAlias = dict[str, str | list[str]]
 OperationList: TypeAlias = list[tuple[str, list[str]]]

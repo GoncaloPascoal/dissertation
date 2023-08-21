@@ -2,9 +2,8 @@
 import pytest
 from qiskit import QuantumCircuit
 
-from routing.env import RoutingEnv
-from routing.topology import linear_topology
-
+from narlsqr.env import RoutingEnv
+from narlsqr.topology import linear_topology
 
 @pytest.fixture
 def env_linear_4q() -> RoutingEnv:

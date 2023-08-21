@@ -7,7 +7,7 @@ from collections.abc import Collection, Set
 from dataclasses import dataclass, field
 from math import inf
 from numbers import Real
-from typing import Optional, Self, cast, Final
+from typing import Final, Optional, Self, cast
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -20,13 +20,13 @@ from ray.rllib.env import EnvContext
 from ray.tune import register_env
 from tqdm.rich import tqdm
 
-from action_mask_model import ActionMaskModel
-from routing.callbacks import RoutingCallbacks
-from routing.circuit_gen import CircuitGenerator, DatasetCircuitGenerator
-from routing.env import RoutingEnv
-from routing.env_wrapper import TrainingWrapper, EvaluationWrapper
-from routing.noise import NoiseGenerator
-from utils import reliability, Factory, seed_default_generators
+from narlsqr.env import RoutingEnv
+from narlsqr.env.wrappers import EvaluationWrapper, TrainingWrapper
+from narlsqr.generators.circuit import CircuitGenerator, DatasetCircuitGenerator
+from narlsqr.generators.noise import NoiseGenerator
+from narlsqr.rllib.action_mask_model import ActionMaskModel
+from narlsqr.rllib.callbacks import RoutingCallbacks
+from narlsqr.utils import Factory, reliability, seed_default_generators
 
 ROUTING_ENV_NAME: Final[str] = 'RoutingEnv'
 
@@ -62,8 +62,8 @@ class TrainingOrchestrator:
         self,
         env_creator: Factory[RoutingEnv],
         circuit_generator: CircuitGenerator,
+        noise_generator: NoiseGenerator,
         *,
-        noise_generator: Optional[NoiseGenerator] = None,
         recalibration_interval: int = 64,
         episodes_per_circuit: int = 1,
         checkpoint_config: Optional[CheckpointConfig] = None,
@@ -95,7 +95,7 @@ class TrainingOrchestrator:
         TrainingOrchestrator.register_routing_env(
             env_creator,
             circuit_generator,
-            noise_generator=noise_generator,
+            noise_generator,
             recalibration_interval=recalibration_interval,
             episodes_per_circuit=episodes_per_circuit,
         )
@@ -161,8 +161,8 @@ class TrainingOrchestrator:
     def register_routing_env(
         env_creator: Factory[RoutingEnv],
         circuit_generator: CircuitGenerator,
+        noise_generator: NoiseGenerator,
         *,
-        noise_generator: Optional[NoiseGenerator] = None,
         recalibration_interval: int = 64,
         episodes_per_circuit: int = 1,
     ):
@@ -184,7 +184,7 @@ class TrainingOrchestrator:
             return TrainingWrapper(
                 env_creator(),
                 env_circuit_generator,
-                noise_generator=env_noise_generator,
+                env_noise_generator,
                 recalibration_interval=recalibration_interval,
                 episodes_per_circuit=episodes_per_circuit,
             )
@@ -197,8 +197,8 @@ class TrainingOrchestrator:
         checkpoint_dir: str,
         env_creator: Factory[RoutingEnv],
         circuit_generator: CircuitGenerator,
+        noise_generator: NoiseGenerator,
         *,
-        noise_generator: Optional[NoiseGenerator] = None,
         recalibration_interval: int = 64,
         episodes_per_circuit: int = 1,
         checkpoint_config: Optional[CheckpointConfig] = None,
@@ -206,7 +206,7 @@ class TrainingOrchestrator:
         TrainingOrchestrator.register_routing_env(
             env_creator,
             circuit_generator,
-            noise_generator=noise_generator,
+            noise_generator,
             recalibration_interval=recalibration_interval,
             episodes_per_circuit=episodes_per_circuit,
         )
@@ -240,8 +240,8 @@ class EvaluationOrchestrator:
         policy: Policy,
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
+        noise_generator: NoiseGenerator,
         *,
-        noise_generator: Optional[NoiseGenerator] = None,
         stochastic: bool = True,
         evaluation_iters: int = 10,
         num_circuits: Optional[int] = None,
@@ -268,14 +268,13 @@ class EvaluationOrchestrator:
             seed_default_generators(seed)
 
             circuit_generator.seed(seed)
-            if noise_generator is not None:
-                noise_generator.seed(seed)
+            noise_generator.seed(seed)
 
         self.policy = policy
         self.eval_env = EvaluationWrapper(
             env,
             circuit_generator,
-            noise_generator=noise_generator,
+            noise_generator,
             evaluation_iters=evaluation_iters,
         )
 

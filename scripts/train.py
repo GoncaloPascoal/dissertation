@@ -7,9 +7,8 @@ from argparse import ArgumentParser
 
 import ray
 
-from parsing import parse_train_config
-from routing.orchestration import is_checkpoint, get_latest_checkpoint_dir
-
+from narlsqr.orchestration import get_latest_checkpoint_dir, is_checkpoint
+from narlsqr.parsing import parse_train_config
 
 def main():
     parser = ArgumentParser(
