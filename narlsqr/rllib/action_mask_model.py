@@ -1,5 +1,5 @@
 
-from typing import Any, cast, Optional
+from typing import Any, Optional, cast
 
 import numpy as np
 import torch
@@ -10,7 +10,6 @@ from ray.rllib.utils.torch_utils import FLOAT_MIN
 from ray.rllib.utils.typing import ModelConfigDict
 from torch import TensorType
 from torch import nn
-
 
 class ActionMaskModel(TorchModelV2, nn.Module):
     embedding: Optional[nn.Embedding]

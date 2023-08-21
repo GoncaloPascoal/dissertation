@@ -5,7 +5,7 @@ from typing import Optional, Self
 import numpy as np
 from qiskit import QuantumCircuit
 
-from revlib import files_in_dir
+from narlsqr.revlib import files_in_dir
 
 
 class CircuitGenerator(ABC):

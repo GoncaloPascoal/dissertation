@@ -3,12 +3,12 @@ import functools
 import operator
 import random
 from collections.abc import Callable
-from typing import Iterable, TypeVar, TypeAlias
+from typing import Iterable, TypeAlias, TypeVar
 
 import numpy as np
 import torch
 from qiskit import QuantumCircuit
-from qiskit.circuit import Qubit, Gate
+from qiskit.circuit import Gate, Qubit
 from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 
 _T = TypeVar('_T')

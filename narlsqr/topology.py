@@ -1,7 +1,6 @@
 
 import rustworkx as rx
 
-
 def t_topology() -> rx.PyGraph:
     """
     T-shape topology present in certain 5-qubit IBM devices (``ibmq_{belem, lima, quito}``).

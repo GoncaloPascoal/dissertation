@@ -7,7 +7,7 @@ from collections.abc import Collection, Set
 from dataclasses import dataclass, field
 from math import inf
 from numbers import Real
-from typing import Optional, Self, cast, Final
+from typing import Final, Optional, Self, cast
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -20,13 +20,13 @@ from ray.rllib.env import EnvContext
 from ray.tune import register_env
 from tqdm.rich import tqdm
 
-from action_mask_model import ActionMaskModel
-from routing.callbacks import RoutingCallbacks
-from routing.circuit_gen import CircuitGenerator, DatasetCircuitGenerator
-from routing.env import RoutingEnv
-from routing.env_wrapper import TrainingWrapper, EvaluationWrapper
-from routing.noise import NoiseGenerator
-from utils import reliability, Factory, seed_default_generators
+from narlsqr.env import RoutingEnv
+from narlsqr.env.wrappers import EvaluationWrapper, TrainingWrapper
+from narlsqr.generators.circuit import CircuitGenerator, DatasetCircuitGenerator
+from narlsqr.generators.noise import NoiseGenerator
+from narlsqr.rllib.action_mask_model import ActionMaskModel
+from narlsqr.rllib.callbacks import RoutingCallbacks
+from narlsqr.utils import Factory, reliability, seed_default_generators
 
 ROUTING_ENV_NAME: Final[str] = 'RoutingEnv'
 

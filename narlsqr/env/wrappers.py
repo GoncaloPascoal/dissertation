@@ -5,9 +5,9 @@ import gymnasium as gym
 import numpy as np
 from qiskit import transpile
 
-from routing.circuit_gen import CircuitGenerator
-from routing.env import RoutingEnv, RoutingObs
-from routing.noise import NoiseGenerator
+from narlsqr.generators.circuit import CircuitGenerator
+from narlsqr.env import RoutingEnv, RoutingObs
+from narlsqr.generators.noise import NoiseGenerator
 
 
 class TrainingWrapper(gym.Wrapper[RoutingObs, int]):

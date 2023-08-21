@@ -2,8 +2,6 @@
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Callable
-from dataclasses import dataclass, field
-from math import e
 from numbers import Number
 from typing import Optional, Self
 
@@ -12,40 +10,6 @@ from nptyping import NDArray
 from qiskit.providers.models import BackendProperties
 from qiskit.providers.models.backendproperties import Gate
 from scipy.stats import gaussian_kde
-
-
-@dataclass(frozen=True, slots=True)
-class NoiseConfig:
-    """
-    Configuration values for controlling rewards in noise-aware routing environments.
-
-    :ivar log_base: Base used to calculate log reliabilities from gate error rates.
-    :ivar min_log_reliability: Greatest penalty that can be issued from scheduling a gate, to prevent infinite rewards.
-        Cannot be positive.
-    :ivar added_gate_reward: Flat value that will be added to the reward associated with each two-qubit gate from the
-        original circuit. Cannot be negative.
-    """
-    log_base: float = field(default=e, kw_only=True)
-    min_log_reliability: float = field(default=-100.0, kw_only=True)
-    added_gate_reward: float = field(default=0.01, kw_only=True)
-
-    def __post_init__(self):
-        if self.log_base <= 1.0:
-            raise ValueError(f'Logarithm base must be greater than 1, got {self.log_base}')
-        if self.min_log_reliability > 0.0:
-            raise ValueError(f'Minimum log reliability cannot be positive, got {self.min_log_reliability}')
-        if self.added_gate_reward < 0.0:
-            raise ValueError(f'Added gate reward cannot be negative, got {self.added_gate_reward}')
-
-    def calculate_log_reliabilities(self, error_rates: NDArray) -> NDArray:
-        if np.any((error_rates < 0.0) | (error_rates > 1.0)):
-            raise ValueError('Got invalid values for error rates')
-
-        return np.where(
-            error_rates < 1.0,
-            np.emath.logn(self.log_base, 1.0 - error_rates),
-            -np.inf
-        ).clip(self.min_log_reliability)
 
 
 def _get_error_rates_from_backend_properties(properties: BackendProperties) -> list[float]:

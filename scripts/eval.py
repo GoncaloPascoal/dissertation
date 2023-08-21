@@ -5,8 +5,7 @@ from argparse import ArgumentParser
 
 import ray
 
-from parsing import parse_eval_config
-
+from narlsqr.parsing import parse_eval_config
 
 def main():
     parser = ArgumentParser('eval', description='Noise-Resilient Reinforcement Learning Strategies for Quantum '

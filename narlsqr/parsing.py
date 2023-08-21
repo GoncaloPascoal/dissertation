@@ -6,13 +6,12 @@ import rustworkx as rx
 import yaml
 from ray.rllib import Policy
 
-from routing.circuit_gen import (
-    CircuitGenerator, RandomCircuitGenerator, LayeredCircuitGenerator, DatasetCircuitGenerator
-)
-from routing.env import CircuitMatrix, ObsModule, QubitInteractions, RoutingEnv
-from routing.noise import NoiseConfig, UniformNoiseGenerator, NoiseGenerator, KdeNoiseGenerator
-from routing.orchestration import TrainingOrchestrator, EvaluationOrchestrator, CheckpointConfig
-from routing.topology import t_topology, h_topology, grid_topology, linear_topology, ibm_16q_topology, ibm_27q_topology
+from narlsqr.env import CircuitMatrix, NoiseConfig, ObsModule, QubitInteractions, RoutingEnv
+from narlsqr.generators.circuit import (CircuitGenerator, DatasetCircuitGenerator, LayeredCircuitGenerator,
+                                        RandomCircuitGenerator)
+from narlsqr.generators.noise import KdeNoiseGenerator, NoiseGenerator, UniformNoiseGenerator
+from narlsqr.orchestration import CheckpointConfig, EvaluationOrchestrator, TrainingOrchestrator
+from narlsqr.topology import grid_topology, h_topology, ibm_16q_topology, ibm_27q_topology, linear_topology, t_topology
 
 OBS_MODULES: Final[dict[str, type[ObsModule]]] = {
     'circuit_matrix': CircuitMatrix,
