@@ -38,8 +38,8 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
     :param allow_bridge_gate: Allow the use of BRIDGE gates when routing.
     :param commutation_analysis: Use commutation rules to schedule additional gates at each time step.
     :param error_rates: Array of two-qubit gate error rates.
-    :param noise_config: Allows configuration of rewards in noise-aware environments. If ``None``, routing will be
-        noise-unaware.
+    :param noise_aware: Whether the environment should be noise-aware.
+    :param noise_config: Configuration for rewards calculated from log reliabilities.
     :param obs_modules: Observation modules that define the key-value pairs in observations.
     :param log_metrics: Log additional metrics when training, such as the number of SWAP and BRIDGE gates used in each
         episode.
@@ -81,6 +81,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         commutation_analysis: bool = True,
         restrict_swaps_to_front_layer: bool = True,
         error_rates: Optional[ArrayLike] = None,
+        noise_aware: bool = True,
         noise_config: Optional[NoiseConfig] = None,
         obs_modules: Optional[list['ObsModule']] = None,
         log_metrics: bool = False,
@@ -107,7 +108,8 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         self.commutation_analysis = commutation_analysis
         self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
         self.error_rates = np.array(error_rates, copy=False)
-        self.noise_config = noise_config
+        self.noise_aware = noise_aware
+        self.noise_config = NoiseConfig() if noise_config is None else noise_config
         self.obs_modules = [] if obs_modules is None else obs_modules
         self.log_metrics = log_metrics
 
@@ -138,10 +140,10 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         self.routed_gates = []
         self.routed_op_nodes = set()
 
-        # Noise-awareness information
+        # Noise-related setup
         if self.noise_aware:
             self.obs_modules.append(LogReliabilities())
-            self.calibrate(self.error_rates)
+        self.calibrate(self.error_rates)
 
         bridge_circuit = QuantumCircuit(3)
         for _ in range(2):
@@ -169,10 +171,6 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         self.metrics = defaultdict(float)
 
     @property
-    def noise_aware(self) -> bool:
-        return self.noise_config is not None
-
-    @property
     def terminated(self) -> bool:
         return self.dag.size() == 0
 
@@ -184,9 +182,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
     ) -> tuple[RoutingObs, dict[str, Any]]:
         if self.log_metrics:
             self.metrics.clear()
-
-            if self.noise_aware:
-                self.metrics['reliability'] = 1.0
+            self.metrics['reliability'] = 1.0
 
         if self.circuit.num_qubits < self.num_qubits:
             self.circuit.add_register(AncillaRegister(self.num_qubits - self.circuit.num_qubits))
@@ -294,17 +290,16 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         """
         self.error_rates = error_rates.copy()
 
-        if self.noise_config is not None:
-            self.log_reliabilities = self.noise_config.calculate_log_reliabilities(error_rates)
-            self.added_gate_reward = abs(np.min(self.log_reliabilities)) + self.noise_config.added_gate_reward
+        self.log_reliabilities = self.noise_config.calculate_log_reliabilities(error_rates)
+        self.added_gate_reward = abs(np.min(self.log_reliabilities)) + self.noise_config.added_gate_reward
 
-            self.edge_to_reliability, self.edge_to_log_reliability = {}, {}
-            for edge, reliability, log_reliability in zip(self.edge_list, 1.0 - error_rates, self.log_reliabilities):
-                self.edge_to_reliability[edge] = reliability
-                self.edge_to_reliability[edge[::-1]] = reliability
+        self.edge_to_reliability, self.edge_to_log_reliability = {}, {}
+        for edge, reliability, log_reliability in zip(self.edge_list, 1.0 - error_rates, self.log_reliabilities):
+            self.edge_to_reliability[edge] = reliability
+            self.edge_to_reliability[edge[::-1]] = reliability
 
-                self.edge_to_log_reliability[edge] = log_reliability
-                self.edge_to_log_reliability[edge[::-1]] = log_reliability
+            self.edge_to_log_reliability[edge] = log_reliability
+            self.edge_to_log_reliability[edge[::-1]] = log_reliability
 
     def copy(self) -> Self:
         """
@@ -353,7 +348,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             self._num_scheduled_2q_gates += 1
             self._scheduling_reward += self._gate_reward(nodes)  # type: ignore
 
-            if self.log_metrics and self.noise_aware:
+            if self.log_metrics:
                 self.metrics['reliability'] *= self.edge_to_reliability[nodes]  # type: ignore
 
     def _commuting_op_nodes(self, op_node: DAGOpNode, qubit: Qubit) -> OrderedSet[DAGOpNode]:
@@ -436,11 +431,9 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         if self.log_metrics:
             self.metrics['added_cnot_count'] += 3
             self.metrics['bridge_count'] += 1
-
-            if self.noise_aware:
-                self.metrics['reliability'] *= (
-                    self.edge_to_reliability[(middle, target)] * self.edge_to_reliability[(control, middle)]
-                ) ** 2
+            self.metrics['reliability'] *= (
+                self.edge_to_reliability[(middle, target)] * self.edge_to_reliability[(control, middle)]
+            ) ** 2
 
         self.routed_gates.append((self.bridge_gate, (control, middle, target)))
 
@@ -448,9 +441,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         if self.log_metrics:
             self.metrics['added_cnot_count'] += 3
             self.metrics['swap_count'] += 1
-
-            if self.noise_aware:
-                self.metrics['reliability'] *= self.edge_to_reliability[edge] ** 3
+            self.metrics['reliability'] *= self.edge_to_reliability[edge] ** 3
 
         self.routed_gates.append((self.swap_gate, edge))
 
@@ -462,25 +453,16 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         self.qubit_to_node[qubit_a], self.qubit_to_node[qubit_b] = node_b, node_a
 
     def _gate_reward(self, edge: tuple[int, int]) -> float:
-        if self.noise_aware:
-            return self.edge_to_log_reliability[edge] + self.added_gate_reward
-
-        return 0.01
+        return self.edge_to_log_reliability[edge] + self.added_gate_reward
 
     def _swap_reward(self, edge: tuple[int, int]) -> float:
-        if self.noise_aware:
-            return 3.0 * self.edge_to_log_reliability[edge]
-
-        return -0.03
+        return 3.0 * self.edge_to_log_reliability[edge]
 
     def _bridge_reward(self, control: int, middle: int, target: int) -> float:
-        if self.noise_aware:
-            return 2.0 * (
-                self.edge_to_log_reliability[(middle, target)] +
-                self.edge_to_log_reliability[(control, middle)]
-            ) + self.added_gate_reward
-
-        return -0.02
+        return 2.0 * (
+            self.edge_to_log_reliability[(middle, target)] +
+            self.edge_to_log_reliability[(control, middle)]
+        ) + self.added_gate_reward
 
     def _reset_state(self):
         self.node_to_qubit = self.initial_mapping.copy()
@@ -512,6 +494,7 @@ class CircuitMatrixRoutingEnv(RoutingEnv):
         commutation_analysis: bool = True,
         restrict_swaps_to_front_layer: bool = True,
         error_rates: Optional[ArrayLike] = None,
+        noise_aware: bool = True,
         noise_config: Optional[NoiseConfig] = None,
         log_metrics: bool = False,
     ):
@@ -523,6 +506,7 @@ class CircuitMatrixRoutingEnv(RoutingEnv):
             restrict_swaps_to_front_layer=restrict_swaps_to_front_layer,
             commutation_analysis=commutation_analysis,
             error_rates=error_rates,
+            noise_aware=noise_aware,
             noise_config=noise_config,
             obs_modules=[CircuitMatrix(depth)],
             log_metrics=log_metrics,

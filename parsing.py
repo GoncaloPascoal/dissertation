@@ -60,7 +60,6 @@ def parse_env_config(path: str) -> Callable[[], RoutingEnv]:
     else:
         raise ValueError(f'Coupling map configuration has invalid type `{type(coupling_map_config)}`')
 
-    # Can make environment noise-unaware by assigning null to noise_config
     noise_config_args = config.pop('noise_config', {})
     noise_config = None if noise_config_args is None else NoiseConfig(**noise_config_args)
 
