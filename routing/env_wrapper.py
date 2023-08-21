@@ -35,8 +35,15 @@ class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
         recalibration_interval: int = 64,
         episodes_per_circuit: int = 1,
     ):
+        if env.num_edges != noise_generator.num_edges:
+            raise ValueError(f'Number of edges in environment and noise generator must be'
+                             f'equal, got {env.num_edges = } and {noise_generator.num_edges = }')
+
         if recalibration_interval <= 0:
             raise ValueError(f'Recalibration interval must be positive, got {recalibration_interval}')
+
+        if episodes_per_circuit <= 0:
+            raise ValueError(f'Training episodes per circuit must be positive, got {episodes_per_circuit}')
 
         self.circuit_generator = circuit_generator
         self.noise_generator = noise_generator
@@ -59,7 +66,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
             self.env.circuit = self.circuit_generator.generate()
 
         if self.current_iter % self.recalibration_interval == 0:
-            error_rates = self.noise_generator.generate_error_rates(self.env.num_edges)
+            error_rates = self.noise_generator.generate_error_rates()
             self.env.calibrate(error_rates)
 
         self.current_iter += 1
@@ -74,8 +81,8 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
 
     :param env: :py:class:`RoutingEnv` to wrap.
     :param circuit_generator: Random circuit generator to be used during training.
-    :param noise_generator: Generator for two-qubit gate error rates. Should be provided iff the environment is
-                            noise-aware. As this is an evaluation environment, the error rates are only generated once.
+    :param noise_generator: Generator for two-qubit gate error rates. As this is an evaluation environment,
+        error rates are only generated once.
     :param evaluation_iters: Number of evaluation iterations per generated circuit.
 
     :ivar current_iter: Current training iteration.
@@ -90,10 +97,14 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
         noise_generator: NoiseGenerator,
         evaluation_iters: int = 20,
     ):
+        if env.num_edges != noise_generator.num_edges:
+            raise ValueError(f'Number of edges in environment and noise generator must be'
+                             f'equal, got {env.num_edges = } and {noise_generator.num_edges = }')
+
         self.circuit_generator = circuit_generator
         self.evaluation_iters = evaluation_iters
 
-        env.calibrate(noise_generator.generate_error_rates(env.num_edges))
+        env.calibrate(noise_generator.generate_error_rates())
         env.initial_mapping = np.arange(env.num_qubits)
 
         super().__init__(env)

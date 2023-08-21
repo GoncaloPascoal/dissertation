@@ -38,7 +38,8 @@ def save_properties(base_dir: str, backend_name: str, data: dict[str, Any]):
 
 def main():
     base_dir = os.path.join('data', 'calibration')
-    backends = ['ibmq_guadalupe', 'ibm_hanoi', 'ibm_cairo', 'ibmq_mumbai', 'ibmq_kolkata', 'ibm_algiers']
+    backends = ['ibmq_guadalupe', 'ibm_hanoi', 'ibm_cairo', 'ibmq_mumbai', 'ibmq_kolkata', 'ibm_algiers',
+                'ibmq_manila', 'ibmq_belem', 'ibm_nairobi']
 
     for backend in backends:
         data = fetch_properties(backend)

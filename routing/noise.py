@@ -1,4 +1,5 @@
 
+import json
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Callable
 from dataclasses import dataclass, field
@@ -8,6 +9,8 @@ from typing import Optional, Self
 
 import numpy as np
 from nptyping import NDArray
+from qiskit.providers.models import BackendProperties
+from qiskit.providers.models.backendproperties import Gate
 from scipy.stats import gaussian_kde
 
 
@@ -45,16 +48,34 @@ class NoiseConfig:
         ).clip(self.min_log_reliability)
 
 
+def _get_error_rates_from_backend_properties(properties: BackendProperties) -> list[float]:
+    gates: list[Gate] = properties.gates
+
+    cnot_gates = sorted(
+        (g for g in gates if g.gate == 'cx' and g.qubits[0] < g.qubits[1]),
+        key=lambda g: g.qubits,
+    )
+
+    return [properties.gate_property(cnot.gate, cnot.qubits, 'gate_error')[0] for cnot in cnot_gates]
+
 class NoiseGenerator(ABC):
     """
     Allows configuration of randomly generated gate error rates. Intended to be used when training noise-aware
     reinforcement learning models.
+
+    :param num_edges: Number of two-qubit error rates to generate.
+    :param seed: Seed for the random number generator.
     """
-    def __init__(self, *, seed: Optional[int] = None):
+
+    def __init__(self, num_edges: int, *, seed: Optional[int] = None):
+        if num_edges <= 0:
+            raise ValueError(f'Number of edges must be positive, got {num_edges}')
+
+        self.num_edges = num_edges
         self.rng = np.random.default_rng(seed)
 
     @abstractmethod
-    def generate_error_rates(self, n: int) -> NDArray:
+    def generate_error_rates(self) -> NDArray:
         raise NotImplementedError
 
     def seed(self, seed: Optional[int] = None):
@@ -69,22 +90,39 @@ class UniformNoiseGenerator(NoiseGenerator):
     :param std: Standard deviation of gate error rates.
     """
 
-    def __init__(self, mean: float, std: float, *, seed: Optional[int] = None):
-        super().__init__(seed=seed)
+    def __init__(self, num_edges: int, mean: float, std: float, *, seed: Optional[int] = None):
+        super().__init__(num_edges, seed=seed)
 
         self.mean = mean
         self.std = std
 
     @classmethod
-    def from_samples(cls, samples: Iterable[float]) -> Self:
+    def from_samples(cls, num_edges: int, samples: Iterable[float], **kwargs) -> Self:
         """
-        Create a noise generator using the mean and standard deviation of a set of samples.
+        Create a uniform noise generator using the mean and standard deviation of a set of samples.
         """
         samples = np.array(samples, copy=False)
-        return cls(samples.mean(), samples.std())
+        return cls(num_edges, samples.mean(), samples.std(), **kwargs)
 
-    def generate_error_rates(self, n: int) -> NDArray:
-        return np.random.normal(self.mean, self.std, n).clip(0.0, 1.0)
+    @classmethod
+    def from_backend_properties(cls, properties: BackendProperties, **kwargs) -> Self:
+        """
+        Create a uniform noise generator from a ``BackendProperties`` object containing device calibration data.
+        """
+        error_rates = _get_error_rates_from_backend_properties(properties)
+        return cls.from_samples(len(error_rates), error_rates, **kwargs)
+
+    @classmethod
+    def from_calibration_file(cls, path: str, **kwargs) -> Self:
+        """
+        Create a noise generator from a JSON file containing device calibration data.
+        """
+        with open(path, 'r') as f:
+            data = json.load(f)
+        return cls.from_backend_properties(BackendProperties.from_dict(data), **kwargs)
+
+    def generate_error_rates(self) -> NDArray:
+        return self.rng.normal(self.mean, self.std, self.num_edges).clip(0.0, 1.0)
 
 class KdeNoiseGenerator(NoiseGenerator):
     """
@@ -99,14 +137,32 @@ class KdeNoiseGenerator(NoiseGenerator):
 
     def __init__(
         self,
+        num_edges: int,
         samples: Iterable[float],
         *,
         seed: Optional[int] = None,
         bw_method: Optional[str | Number | Callable] = None
     ):
-        super().__init__(seed=seed)
+        super().__init__(num_edges, seed=seed)
 
         self.kde = gaussian_kde(samples, bw_method=bw_method)
 
-    def generate_error_rates(self, n: int) -> NDArray:
-        return np.squeeze(self.kde.resample(n)).clip(0.0, 1.0)
+    @classmethod
+    def from_backend_properties(cls, properties: BackendProperties, **kwargs) -> Self:
+        """
+        Create a KDE noise generator from a ``BackendProperties`` object containing device calibration data.
+        """
+        error_rates = _get_error_rates_from_backend_properties(properties)
+        return cls(len(error_rates), error_rates, **kwargs)
+
+    @classmethod
+    def from_calibration_file(cls, path: str, **kwargs) -> Self:
+        """
+        Create a KDE noise generator from a JSON file containing device calibration data.
+        """
+        with open(path, 'r') as f:
+            data = json.load(f)
+        return cls.from_backend_properties(BackendProperties.from_dict(data), **kwargs)
+
+    def generate_error_rates(self) -> NDArray:
+        return np.squeeze(self.kde.resample(self.num_edges, self.rng)).clip(0.0, 1.0)

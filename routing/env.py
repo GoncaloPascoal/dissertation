@@ -2,24 +2,24 @@
 import copy
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
-from typing import Optional, Any, SupportsFloat, Self, TypeAlias, Literal
+from collections.abc import Iterable
+from typing import Any, Literal, Optional, Self, SupportsFloat, TypeAlias
 
 import gymnasium as gym
 import numpy as np
 import rustworkx as rx
 from gymnasium import spaces
-from nptyping import NDArray, Int8
-from numpy.typing import ArrayLike
+from nptyping import Int8, NDArray
 from ordered_set import OrderedSet
-from qiskit import QuantumCircuit, AncillaRegister
+from qiskit import AncillaRegister, QuantumCircuit
 from qiskit.circuit import Operation, Qubit
-from qiskit.circuit.library import SwapGate, CXGate
+from qiskit.circuit.library import CXGate, SwapGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGOpNode
 from qiskit.transpiler.passes import CommutationAnalysis
 
 from routing.noise import NoiseConfig
-from utils import qubits_to_indices, indices_to_qubits, dag_layers
+from utils import dag_layers, indices_to_qubits, qubits_to_indices
 
 RoutingObs: TypeAlias = dict[str, NDArray]
 GateSchedulingList: TypeAlias = list[tuple[DAGOpNode, tuple[int, ...]]]
@@ -76,11 +76,11 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         self,
         coupling_map: rx.PyGraph,
         circuit: Optional[QuantumCircuit] = None,
-        initial_mapping: Optional[ArrayLike] = None,
+        initial_mapping: Optional[Iterable[float]] = None,
         allow_bridge_gate: bool = True,
         commutation_analysis: bool = True,
         restrict_swaps_to_front_layer: bool = True,
-        error_rates: Optional[ArrayLike] = None,
+        error_rates: Optional[Iterable[float]] = None,
         noise_aware: bool = True,
         noise_config: Optional[NoiseConfig] = None,
         obs_modules: Optional[list['ObsModule']] = None,
@@ -489,11 +489,11 @@ class CircuitMatrixRoutingEnv(RoutingEnv):
         coupling_map: rx.PyGraph,
         depth: int,
         circuit: Optional[QuantumCircuit] = None,
-        initial_mapping: Optional[ArrayLike] = None,
+        initial_mapping: Optional[Iterable[float]] = None,
         allow_bridge_gate: bool = True,
         commutation_analysis: bool = True,
         restrict_swaps_to_front_layer: bool = True,
-        error_rates: Optional[ArrayLike] = None,
+        error_rates: Optional[Iterable[float]] = None,
         noise_aware: bool = True,
         noise_config: Optional[NoiseConfig] = None,
         log_metrics: bool = False,
