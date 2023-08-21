@@ -84,15 +84,12 @@ def parse_env_config(path: str) -> Callable[[], RoutingEnv]:
     return create_env
 
 
-def parse_generators(config: dict[str, Any]) -> tuple[CircuitGenerator, Optional[NoiseGenerator]]:
+def parse_generators(config: dict[str, Any]) -> tuple[CircuitGenerator, NoiseGenerator]:
     circuit_config = config.pop('circuit')
-    noise_config = config.pop('noise', None)
+    noise_config = config.pop('noise')
 
     circuit_generator = CIRCUIT_GENERATORS[circuit_config['type']](**circuit_config['args'])
-
-    noise_generator = None
-    if noise_config is not None:
-        noise_generator = NOISE_GENERATORS[noise_config['type']](**noise_config['args'])
+    noise_generator = NOISE_GENERATORS[noise_config['type']](**noise_config['args'])
 
     return circuit_generator, noise_generator
 
