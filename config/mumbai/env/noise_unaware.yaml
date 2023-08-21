@@ -1,0 +1,9 @@
+
+coupling_map: 'ibm_27q'
+
+obs_modules:
+  - type: 'circuit_matrix'
+    args:
+      depth: 4
+
+noise_aware: false

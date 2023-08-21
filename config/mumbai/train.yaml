@@ -3,21 +3,20 @@ generators:
   circuit:
     type: 'random'
     args:
-      num_qubits: 27
       num_gates: 128
-      seed: 0
   noise:
-    type: 'uniform'
+    type: 'uniform_calibration'
     args:
-      mean: 1.0e-2
-      std: 3.0e-3
-      seed: 0
+      path: 'data/calibration/mumbai.json'
+
+seed: 0
 
 # Model
-hidden_layers: [256, 256]
+hidden_layers: [512, 512]
+embedding_dim: 3
 minibatch_size: 2048
 batch_size: 32768
-sgd_iters: 15
+sgd_iters: 10
 lr: 5.0e-5
 
 # Resources

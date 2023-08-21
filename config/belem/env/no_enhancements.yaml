@@ -1,8 +1,5 @@
 
-coupling_map:
-  type: 'linear'
-  args:
-    num_qubits: 5
+coupling_map: 't'
 
 obs_modules:
   - type: 'circuit_matrix'
@@ -10,3 +7,5 @@ obs_modules:
       depth: 8
 
 allow_bridge_gate: false
+commutation_analysis: false
+restrict_swaps_to_front_layer: false

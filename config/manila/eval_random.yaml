@@ -1,0 +1,14 @@
+
+generators:
+  circuit:
+    type: 'random'
+    args:
+      num_gates: 64
+  noise:
+    type: 'uniform_calibration'
+    args:
+      path: 'data/calibration/manila.json'
+
+num_circuits: 100
+use_tqdm: true
+seed: 0

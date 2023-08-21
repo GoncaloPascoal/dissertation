@@ -9,4 +9,4 @@ obs_modules:
     args:
       depth: 8
 
-noise_config: null
+noise_aware: false

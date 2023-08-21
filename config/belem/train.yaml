@@ -1,0 +1,29 @@
+
+generators:
+  circuit:
+    type: 'random'
+    args:
+      num_gates: 64
+  noise:
+    type: 'uniform_calibration'
+    args:
+      path: 'data/calibration/belem.json'
+
+seed: 0
+
+# Model
+hidden_layers: [128, 128]
+embedding_dim: 2
+minibatch_size: 512
+batch_size: 8192
+sgd_iters: 5
+lr_schedule:
+    - [0, 3.0e-4]
+    - [491_520, 1.0e-4]
+    - [1_638_400, 5.0e-5]
+    - [2_457_600, 3.0e-5]
+
+# Resources
+num_workers: 18
+envs_per_worker: 8
+num_gpus: 1

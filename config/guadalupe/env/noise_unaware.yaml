@@ -1,0 +1,9 @@
+
+coupling_map: 'ibm_16q'
+
+obs_modules:
+  - type: 'circuit_matrix'
+    args:
+      depth: 5
+
+noise_aware: false

@@ -3,13 +3,11 @@ generators:
   circuit:
     type: 'random'
     args:
-      num_qubits: 7
       num_gates: 64
   noise:
-    type: 'uniform'
+    type: 'uniform_calibration'
     args:
-      mean: 1.0e-2
-      std: 3.0e-3
+      path: 'data/calibration/nairobi.json'
 
 seed: 0
 

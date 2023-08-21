@@ -1,6 +1,6 @@
 __pycache__
 .idea
 
-data
+data/calibration/**/
 logs
 models

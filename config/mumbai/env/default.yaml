@@ -1,7 +1,7 @@
 
-coupling_map: 'ibm_16q'
+coupling_map: 'ibm_27q'
 
 obs_modules:
   - type: 'circuit_matrix'
     args:
-      depth: 8
+      depth: 4
