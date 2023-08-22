@@ -4,11 +4,8 @@ generators:
     type: 'random'
     args:
       num_gates: 64
-  noise:
-    type: 'kde_calibration'
-    args:
-      path: 'data/calibration/nairobi.json'
 
+error_rates: 'data/calibration/nairobi.json'
 num_circuits: 100
 use_tqdm: true
 seed: 0

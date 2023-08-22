@@ -4,7 +4,7 @@ import ctypes
 import os.path
 import pathlib
 import time
-from collections.abc import Collection, Set
+from collections.abc import Collection, Iterable, Set
 from dataclasses import dataclass, field
 from datetime import datetime
 from math import inf
@@ -12,6 +12,7 @@ from numbers import Real
 from typing import Final, Optional, Self, cast
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 from qiskit import QuantumCircuit, transpile
@@ -262,7 +263,7 @@ class EvaluationOrchestrator:
         policy: Policy,
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
-        noise_generator: NoiseGenerator,
+        error_rates: Iterable[float],
         *,
         stochastic: bool = True,
         evaluation_iters: int = 10,
@@ -288,15 +289,15 @@ class EvaluationOrchestrator:
 
         if seed is not None:
             seed_default_generators(seed)
-
             circuit_generator.seed(seed)
-            noise_generator.seed(seed)
+
+        error_rates = np.array(error_rates, copy=False)
+        env.calibrate(error_rates)
 
         self.policy = policy
         self.eval_env = EvaluationWrapper(
             env,
             circuit_generator,
-            noise_generator,
             evaluation_iters=evaluation_iters,
         )
 

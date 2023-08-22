@@ -12,7 +12,7 @@ from qiskit.providers.models.backendproperties import Gate
 from scipy.stats import gaussian_kde
 
 
-def _get_error_rates_from_backend_properties(properties: BackendProperties) -> list[float]:
+def get_error_rates_from_backend_properties(properties: BackendProperties) -> list[float]:
     gates: list[Gate] = properties.gates
 
     cnot_gates = sorted(
@@ -88,7 +88,7 @@ class UniformNoiseGenerator(NoiseGenerator):
         """
         Create a uniform noise generator from a ``BackendProperties`` object containing device calibration data.
         """
-        error_rates = _get_error_rates_from_backend_properties(properties)
+        error_rates = get_error_rates_from_backend_properties(properties)
         return cls.from_samples(len(error_rates), error_rates, **kwargs)
 
     @classmethod
@@ -132,7 +132,7 @@ class KdeNoiseGenerator(NoiseGenerator):
         """
         Create a KDE noise generator from a ``BackendProperties`` object containing device calibration data.
         """
-        error_rates = _get_error_rates_from_backend_properties(properties)
+        error_rates = get_error_rates_from_backend_properties(properties)
         return cls(len(error_rates), error_rates, **kwargs)
 
     @classmethod

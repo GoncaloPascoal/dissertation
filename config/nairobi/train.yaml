@@ -1,13 +1,12 @@
 
-generators:
-  circuit:
-    type: 'random'
-    args:
-      num_gates: 64
-  noise:
-    type: 'kde_calibration'
-    args:
-      path: 'data/calibration/nairobi.json'
+circuit_generator:
+  type: 'random'
+  args:
+    num_gates: 64
+noise_generator:
+  type: 'kde_calibration'
+  args:
+    path: 'data/calibration/nairobi.json'
 
 seed: 0
 

@@ -1,15 +1,18 @@
 
+import json
 from collections.abc import Callable
 from typing import Any, Final, Optional
 
 import rustworkx as rx
 import yaml
+from qiskit.providers.models import BackendProperties
 from ray.rllib import Policy
 
 from narlsqr.env import CircuitMatrix, NoiseConfig, ObsModule, QubitInteractions, RoutingEnv
 from narlsqr.generators.circuit import (CircuitGenerator, DatasetCircuitGenerator, LayeredCircuitGenerator,
                                         RandomCircuitGenerator)
-from narlsqr.generators.noise import KdeNoiseGenerator, NoiseGenerator, UniformNoiseGenerator
+from narlsqr.generators.noise import KdeNoiseGenerator, NoiseGenerator, UniformNoiseGenerator, \
+    get_error_rates_from_backend_properties
 from narlsqr.orchestration import CheckpointConfig, EvaluationOrchestrator, TrainingOrchestrator
 from narlsqr.topology import grid_topology, h_topology, ibm_16q_topology, ibm_27q_topology, linear_topology, t_topology
 
@@ -85,24 +88,20 @@ def parse_env_config(path: str) -> Callable[[], RoutingEnv]:
     return create_env
 
 
-def parse_generators(config: dict[str, Any], env: RoutingEnv) -> tuple[CircuitGenerator, NoiseGenerator]:
-    circuit_config = config.pop('circuit')
-    noise_config = config.pop('noise')
+def parse_circuit_generator(config: dict[str, Any], env: RoutingEnv) -> CircuitGenerator:
+    args = config['args']
+    args['num_qubits'] = env.num_qubits
 
-    cg_type = circuit_config['type']
-    cg_args: dict[str, Any] = circuit_config['args']
-    cg_args['num_qubits'] = env.num_qubits
+    return CIRCUIT_GENERATORS[config['type']](**args)
 
-    ng_type = noise_config['type']
-    ng_args: dict[str, Any] = noise_config['args']
-    if ng_type not in {'uniform_calibration', 'kde_calibration'}:
-        ng_args['num_edges'] = env.num_edges
+def parse_noise_generator(config: dict[str, Any], env: RoutingEnv) -> NoiseGenerator:
+    type_ = config['type']
+    args = config['args']
 
-    circuit_generator = CIRCUIT_GENERATORS[cg_type](**cg_args)
-    noise_generator = NOISE_GENERATORS[ng_type](**ng_args)
+    if type_ not in {'uniform_calibration', 'kde_calibration'}:
+        args['num_edges'] = env.num_edges
 
-    return circuit_generator, noise_generator
-
+    return NOISE_GENERATORS[type_](**args)
 
 def parse_train_config(
     env_config_path: str,
@@ -114,8 +113,9 @@ def parse_train_config(
     env_creator = parse_env_config(env_config_path)
     config = parse_yaml(train_config_path)
 
-    generators_config = config.pop('generators')
-    circuit_generator, noise_generator = parse_generators(generators_config, env_creator())
+    sample_env = env_creator()
+    circuit_generator = parse_circuit_generator(config.pop('circuit_generator'), sample_env)
+    noise_generator = parse_noise_generator(config.pop('noise_generator'), sample_env)
 
     checkpoint_config = config.pop('checkpoint_config', None)
     if checkpoint_config is not None:
@@ -160,14 +160,20 @@ def parse_eval_config(
 
     policy = Policy.from_checkpoint(checkpoint_dir)['default_policy']
 
-    generators_config = config.pop('generators')
-    circuit_generator, noise_generator = parse_generators(generators_config, env)
+    error_rates = config.pop('error_rates')
+    if isinstance(error_rates, str):
+        with open(error_rates, 'r') as f:
+            data = json.load(f)
+        backend_properties = BackendProperties.from_dict(data)
+        error_rates = get_error_rates_from_backend_properties(backend_properties)
+
+    circuit_generator = parse_circuit_generator(config.pop('circuit_generator'), env)
 
     args = dict(
         policy=policy,
         env=env,
         circuit_generator=circuit_generator,
-        noise_generator=noise_generator,
+        error_rates=error_rates,
         **config,
     )
     args.update(override_args)

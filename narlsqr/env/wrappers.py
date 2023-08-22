@@ -1,4 +1,4 @@
-
+from collections.abc import Iterable
 from typing import Optional, Any
 
 import gymnasium as gym
@@ -81,8 +81,6 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
 
     :param env: :py:class:`RoutingEnv` to wrap.
     :param circuit_generator: Random circuit generator to be used during training.
-    :param noise_generator: Generator for two-qubit gate error rates. As this is an evaluation environment,
-        error rates are only generated once.
     :param evaluation_iters: Number of evaluation iterations per generated circuit.
 
     :ivar current_iter: Current training iteration.
@@ -94,18 +92,10 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
         self,
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
-        noise_generator: NoiseGenerator,
         evaluation_iters: int = 20,
     ):
-        if env.num_edges != noise_generator.num_edges:
-            raise ValueError(f'Number of edges in environment and noise generator must be'
-                             f'equal, got {env.num_edges = } and {noise_generator.num_edges = }')
-
         self.circuit_generator = circuit_generator
         self.evaluation_iters = evaluation_iters
-
-        env.calibrate(noise_generator.generate())
-        env.initial_mapping = np.arange(env.num_qubits)
 
         super().__init__(env)
 
