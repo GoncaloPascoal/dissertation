@@ -89,14 +89,17 @@ def parse_generators(config: dict[str, Any], env: RoutingEnv) -> tuple[CircuitGe
     circuit_config = config.pop('circuit')
     noise_config = config.pop('noise')
 
+    cg_type = circuit_config['type']
     cg_args: dict[str, Any] = circuit_config['args']
-    ng_args: dict[str, Any] = noise_config['args']
-
     cg_args['num_qubits'] = env.num_qubits
-    ng_args['num_edges'] = env.num_edges
 
-    circuit_generator = CIRCUIT_GENERATORS[circuit_config['type']](**cg_args)
-    noise_generator = NOISE_GENERATORS[noise_config['type']](**ng_args)
+    ng_type = noise_config['type']
+    ng_args: dict[str, Any] = noise_config['args']
+    if ng_type not in {'uniform_calibration', 'kde_calibration'}:
+        ng_args['num_edges'] = env.num_edges
+
+    circuit_generator = CIRCUIT_GENERATORS[cg_type](**cg_args)
+    noise_generator = NOISE_GENERATORS[ng_type](**ng_args)
 
     return circuit_generator, noise_generator
 
