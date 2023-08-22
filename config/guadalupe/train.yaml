@@ -14,11 +14,14 @@ seed: 0
 # Model
 hidden_layers: [256, 256]
 embedding_dim: 3
-gae_lambda: 0.98
+gae_lambda: 0.99
 minibatch_size: 1024
 batch_size: 16384
 sgd_iters: 10
-lr: 5.0e-5
+lr_schedule:
+    - [0, 1.0e-4]
+    - [2_000_000, 5.0e-5]
+    - [5_000_000, 1.0e-5]
 
 # Resources
 num_workers: 18
