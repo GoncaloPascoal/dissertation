@@ -66,7 +66,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
             self.env.circuit = self.circuit_generator.generate()
 
         if self.current_iter % self.recalibration_interval == 0:
-            error_rates = self.noise_generator.generate_error_rates()
+            error_rates = self.noise_generator.generate()
             self.env.calibrate(error_rates)
 
         self.current_iter += 1
@@ -104,7 +104,7 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
         self.circuit_generator = circuit_generator
         self.evaluation_iters = evaluation_iters
 
-        env.calibrate(noise_generator.generate_error_rates())
+        env.calibrate(noise_generator.generate())
         env.initial_mapping = np.arange(env.num_qubits)
 
         super().__init__(env)

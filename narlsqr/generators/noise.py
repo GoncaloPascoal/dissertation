@@ -28,19 +28,26 @@ class NoiseGenerator(ABC):
     reinforcement learning models.
 
     :param num_edges: Number of two-qubit error rates to generate.
+    :param min_error_rate: Minimum error rate.
     :param seed: Seed for the random number generator.
     """
 
-    def __init__(self, num_edges: int, *, seed: Optional[int] = None):
+    def __init__(self, num_edges: int, *, min_error_rate: float = 1e-3, seed: Optional[int] = None):
         if num_edges <= 0:
             raise ValueError(f'Number of edges must be positive, got {num_edges}')
+        if min_error_rate < 0.0:
+            raise ValueError(f'Minimum error rate must not be negative, got {min_error_rate}')
 
         self.num_edges = num_edges
+        self.min_error_rate = min_error_rate
         self.rng = np.random.default_rng(seed)
 
     @abstractmethod
-    def generate_error_rates(self) -> NDArray:
+    def _generate(self) -> NDArray:
         raise NotImplementedError
+
+    def generate(self) -> NDArray:
+        return self._generate().clip(self.min_error_rate, 1.0)
 
     def seed(self, seed: Optional[int] = None):
         """Reseed the random number generator used to generate gate error rates."""
@@ -54,8 +61,16 @@ class UniformNoiseGenerator(NoiseGenerator):
     :param std: Standard deviation of gate error rates.
     """
 
-    def __init__(self, num_edges: int, mean: float, std: float, *, seed: Optional[int] = None):
-        super().__init__(num_edges, seed=seed)
+    def __init__(
+        self,
+        num_edges: int,
+        mean: float,
+        std: float,
+        *,
+        min_error_rate: float = 1e-3,
+        seed: Optional[int] = None,
+    ):
+        super().__init__(num_edges, min_error_rate=min_error_rate, seed=seed)
 
         self.mean = mean
         self.std = std
@@ -85,8 +100,8 @@ class UniformNoiseGenerator(NoiseGenerator):
             data = json.load(f)
         return cls.from_backend_properties(BackendProperties.from_dict(data), **kwargs)
 
-    def generate_error_rates(self) -> NDArray:
-        return self.rng.normal(self.mean, self.std, self.num_edges).clip(0.0, 1.0)
+    def _generate(self) -> NDArray:
+        return self.rng.normal(self.mean, self.std, self.num_edges)
 
 class KdeNoiseGenerator(NoiseGenerator):
     """
@@ -104,10 +119,11 @@ class KdeNoiseGenerator(NoiseGenerator):
         num_edges: int,
         samples: Iterable[float],
         *,
+        min_error_rate: float = 1e-3,
         seed: Optional[int] = None,
         bw_method: Optional[str | Number | Callable] = None
     ):
-        super().__init__(num_edges, seed=seed)
+        super().__init__(num_edges, min_error_rate=min_error_rate, seed=seed)
 
         self.kde = gaussian_kde(samples, bw_method=bw_method)
 
@@ -128,5 +144,5 @@ class KdeNoiseGenerator(NoiseGenerator):
             data = json.load(f)
         return cls.from_backend_properties(BackendProperties.from_dict(data), **kwargs)
 
-    def generate_error_rates(self) -> NDArray:
-        return np.squeeze(self.kde.resample(self.num_edges, self.rng)).clip(0.0, 1.0)
+    def _generate(self) -> NDArray:
+        return np.squeeze(self.kde.resample(self.num_edges, self.rng))
