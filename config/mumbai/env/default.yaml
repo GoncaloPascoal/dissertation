@@ -1,4 +1,6 @@
 
+name: 'mumbai'
+
 coupling_map: 'ibm_27q'
 
 obs_modules:

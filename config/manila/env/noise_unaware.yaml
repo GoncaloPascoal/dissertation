@@ -1,4 +1,6 @@
 
+name: 'manila_noise_unaware'
+
 coupling_map:
   type: 'linear'
   args:

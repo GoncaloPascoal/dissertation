@@ -1,4 +1,6 @@
 
+name: 'manila'
+
 coupling_map:
   type: 'linear'
   args:

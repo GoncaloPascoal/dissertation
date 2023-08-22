@@ -63,7 +63,7 @@ class NoiseConfig:
 
 class RoutingEnv(gym.Env[RoutingObs, int], ABC):
     """
-    Base qubit routing environment.
+    Qubit routing environment.
 
     :param coupling_map: Graph representing the connectivity of the target device.
     :param circuit: Quantum circuit to compile. This argument is optional during environment construction but a valid
@@ -78,6 +78,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
     :param obs_modules: Observation modules that define the key-value pairs in observations.
     :param log_metrics: Log additional metrics when training, such as the number of SWAP and BRIDGE gates used in each
         episode.
+    :param name: Name of the routing environment. Useful for organizing training logs.
 
     :ivar node_to_qubit: Current mapping from physical nodes to logical qubits.
     :ivar qubit_to_node: Current mapping from logical qubits to physical nodes.
@@ -120,6 +121,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         noise_config: Optional[NoiseConfig] = None,
         obs_modules: Optional[list['ObsModule']] = None,
         log_metrics: bool = False,
+        name: str = 'routing_env',
     ):
         num_qubits = coupling_map.num_nodes()
         num_edges = coupling_map.num_edges()
@@ -147,6 +149,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         self.noise_config = NoiseConfig() if noise_config is None else noise_config
         self.obs_modules = [] if obs_modules is None else obs_modules
         self.log_metrics = log_metrics
+        self.name = name
 
         # Computations using coupling map
         self.num_qubits = num_qubits

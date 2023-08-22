@@ -1,10 +1,12 @@
 
 import copy
 import ctypes
+import os.path
 import pathlib
 import time
 from collections.abc import Collection, Set
 from dataclasses import dataclass, field
+from datetime import datetime
 from math import inf
 from numbers import Real
 from typing import Final, Optional, Self, cast
@@ -18,6 +20,8 @@ from ray.rllib import Policy
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.rllib.env import EnvContext
 from ray.tune import register_env
+from ray.tune.logger import UnifiedLogger
+from ray.tune.result import DEFAULT_RESULTS_DIR
 from tqdm.rich import tqdm
 
 from narlsqr.env import RoutingEnv
@@ -82,12 +86,13 @@ class TrainingOrchestrator:
         seed: Optional[int] = None,
         evaluation_interval: Optional[int] = None,
         evaluation_duration: int = 128,
+        base_logging_dir: Optional[str] = None,
         num_gpus: float = 0.0,
         num_workers: int = 2,
         envs_per_worker: int = 4,
     ):
-        if hidden_layers is None:
-            hidden_layers = [64, 64]
+        hidden_layers = [64, 64] if hidden_layers is None else hidden_layers
+        base_logging_dir = DEFAULT_RESULTS_DIR if base_logging_dir is None else base_logging_dir
 
         if seed is not None:
             seed_default_generators(seed)
@@ -99,6 +104,19 @@ class TrainingOrchestrator:
             recalibration_interval=recalibration_interval,
             episodes_per_circuit=episodes_per_circuit,
         )
+
+        env_name = env_creator().name
+        time_str = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        logging_dir = f'{env_name}_{time_str}'
+
+        def logger_creator(logger_config: dict) -> UnifiedLogger:
+            if not os.path.exists(base_logging_dir):
+                os.makedirs(base_logging_dir)
+
+            return UnifiedLogger(
+                logger_config,
+                os.path.join(base_logging_dir, logging_dir),
+            )
 
         config = (
             PPOConfig()
@@ -125,7 +143,11 @@ class TrainingOrchestrator:
                 _enable_learner_api=False,
             )
             .callbacks(RoutingCallbacks)
-            .debugging(log_level='ERROR', seed=seed)
+            .debugging(
+                logger_creator=logger_creator,
+                log_level='ERROR',
+                seed=seed,
+            )
             .environment(
                 env=ROUTING_ENV_NAME,
                 env_config=dict(seed=seed),

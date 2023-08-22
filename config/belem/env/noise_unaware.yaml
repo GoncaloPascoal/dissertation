@@ -1,4 +1,6 @@
 
+name: 'belem_noise_unaware'
+
 coupling_map: 't'
 
 obs_modules:

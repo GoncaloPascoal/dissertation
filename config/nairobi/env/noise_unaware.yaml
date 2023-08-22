@@ -1,4 +1,6 @@
 
+name: 'nairobi_noise_unaware'
+
 coupling_map: 'h'
 
 obs_modules:

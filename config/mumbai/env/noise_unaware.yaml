@@ -1,4 +1,6 @@
 
+name: 'mumbai_noise_unaware'
+
 coupling_map: 'ibm_27q'
 
 obs_modules:

@@ -1,4 +1,6 @@
 
+name: 'belem_no_enhancements'
+
 coupling_map: 't'
 
 obs_modules:

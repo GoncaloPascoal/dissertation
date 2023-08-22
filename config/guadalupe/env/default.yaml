@@ -1,4 +1,6 @@
 
+name: 'guadalupe'
+
 coupling_map: 'ibm_16q'
 
 obs_modules:

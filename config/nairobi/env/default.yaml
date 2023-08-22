@@ -1,4 +1,6 @@
 
+name: 'nairobi'
+
 coupling_map: 'h'
 
 obs_modules:
