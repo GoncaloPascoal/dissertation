@@ -3,7 +3,7 @@ generators:
   circuit:
     type: 'random'
     args:
-      num_gates: 128
+      num_gates: 64
   noise:
     type: 'kde_calibration'
     args:
