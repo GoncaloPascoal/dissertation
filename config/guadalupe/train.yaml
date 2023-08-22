@@ -14,13 +14,14 @@ seed: 0
 # Model
 hidden_layers: [256, 256]
 embedding_dim: 3
-gae_lambda: 0.99
+gae_lambda: 0.96
+entropy_coeff: 1.0e-3
 minibatch_size: 1024
 batch_size: 16384
 sgd_iters: 10
 lr_schedule:
     - [0, 1.0e-4]
-    - [2_000_000, 5.0e-5]
+    - [2_500_000, 5.0e-5]
     - [5_000_000, 1.0e-5]
 
 # Resources
