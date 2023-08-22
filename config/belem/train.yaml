@@ -5,7 +5,7 @@ generators:
     args:
       num_gates: 64
   noise:
-    type: 'uniform_calibration'
+    type: 'kde_calibration'
     args:
       path: 'data/calibration/belem.json'
 
