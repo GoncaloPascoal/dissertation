@@ -305,7 +305,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
                     shortest_path = self.shortest_paths[control][target]
 
                     if len(shortest_path) == 3:
-                        pair = tuple(sorted(indices))
+                        pair = tuple(sorted(nodes))
                         pair_to_bridge_args[pair] = (op_node, tuple(shortest_path))
 
             self.pair_to_bridge_args = pair_to_bridge_args    # type: ignore
@@ -407,10 +407,12 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             indices = qubits_to_indices(self.circuit, qargs)
             nodes = tuple(self.qubit_to_node[i] for i in indices)
 
-            if len(locked_nodes) < self.num_qubits:
-                if op_node in to_schedule or self._is_schedulable(nodes, locked_nodes):
+            if op_node in to_schedule:
+                self._schedule_gate(op_node, nodes)
+            elif len(locked_nodes) < self.num_qubits:
+                if self._is_schedulable(nodes, locked_nodes):
                     self._schedule_gate(op_node, nodes)
-                elif len(locked_nodes) < self.num_qubits:
+                else:
                     if self.commutation_analysis:
                         commutation_sets: dict[Qubit, OrderedSet[DAGOpNode]] = {
                             q: self._commuting_op_nodes(op_node, q)
@@ -456,8 +458,6 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
                                         to_schedule.add(commuting_node)
 
                     locked_nodes.update(nodes)
-            elif op_node in to_schedule:
-                self._schedule_gate(op_node, nodes)
 
     def _is_schedulable(self, nodes: tuple[int, ...], locked_nodes: set[int]) -> bool:
         valid_under_current_mapping = len(nodes) != 2 or self.coupling_map.has_edge(nodes[0], nodes[1])
