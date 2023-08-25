@@ -8,7 +8,7 @@ from qiskit import transpile
 from narlsqr.generators.circuit import CircuitGenerator
 from narlsqr.env import RoutingEnv, RoutingObs
 from narlsqr.generators.noise import NoiseGenerator
-
+from narlsqr.utils import IBM_BASIS_GATES
 
 class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
     """
@@ -92,7 +92,7 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
         self,
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
-        evaluation_iters: int = 20,
+        evaluation_iters: int = 10,
     ):
         self.circuit_generator = circuit_generator
         self.evaluation_iters = evaluation_iters
@@ -108,10 +108,9 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
         options: Optional[dict[str, Any]] = None,
     ) -> tuple[RoutingObs, dict[str, Any]]:
         if self.current_iter % self.evaluation_iters == 0:
-            # TODO: extract IBM gate set to constant
             self.env.circuit = transpile(
                 self.circuit_generator.generate(),
-                basis_gates=['cx', 'id', 'rz', 'sx', 'x'],
+                basis_gates=IBM_BASIS_GATES,
                 optimization_level=0,
                 seed_transpiler=0,
             )

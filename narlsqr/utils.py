@@ -3,7 +3,7 @@ import functools
 import operator
 import random
 from collections.abc import Callable
-from typing import Iterable, TypeAlias, TypeVar
+from typing import Final, Iterable, TypeAlias, TypeVar
 
 import numpy as np
 import torch
@@ -13,6 +13,9 @@ from qiskit.dagcircuit import DAGCircuit, DAGOpNode
 
 _T = TypeVar('_T')
 Factory: TypeAlias = Callable[[], _T]
+
+
+IBM_BASIS_GATES: Final = ['cx', 'id', 'rz', 'sx', 'x']
 
 
 def qubits_to_indices(qc: QuantumCircuit, qubits: Iterable[Qubit]) -> tuple[int, ...]:
