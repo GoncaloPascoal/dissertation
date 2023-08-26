@@ -7,6 +7,7 @@ import rustworkx as rx
 import yaml
 from qiskit.providers.models import BackendProperties
 from ray.rllib import Policy
+from ray.rllib.policy.sample_batch import DEFAULT_POLICY_ID
 
 from narlsqr.env import CircuitMatrix, NoiseConfig, ObsModule, QubitInteractions, RoutingEnv
 from narlsqr.generators.circuit import (CircuitGenerator, DatasetCircuitGenerator, LayeredCircuitGenerator,
@@ -158,7 +159,7 @@ def parse_eval_config(
     env = parse_env_config(env_config_path)()
     config = parse_yaml(eval_config_path)
 
-    policy = Policy.from_checkpoint(checkpoint_dir)
+    policy = Policy.from_checkpoint(checkpoint_dir)[DEFAULT_POLICY_ID]
 
     error_rates = config.pop('error_rates')
     if isinstance(error_rates, str):
