@@ -5,6 +5,7 @@ from argparse import ArgumentParser
 
 import ray
 
+from narlsqr.orchestration import get_latest_checkpoint_dir
 from narlsqr.parsing import parse_eval_config
 
 def main():
@@ -14,7 +15,8 @@ def main():
     parser.add_argument('env_config', help='environment configuration file')
     parser.add_argument('eval_config', help='evaluation configuration file')
 
-    parser.add_argument('-c', '--checkpoint-dir', metavar='P', required=True, help='path to model checkpoint')
+    parser.add_argument('-m', '--model-dir', metavar='P', required=True, help='path to trained model')
+    parser.add_argument('--save-to', metavar='P', required=True, help='path where metrics should be saved to')
     parser.add_argument('-i', '--evaluation-iters', metavar='N', type=int, default=argparse.SUPPRESS,
                         help='evaluation iterations per circuit')
     parser.add_argument('-r', '--routing-methods', nargs='+', choices=['basic', 'stochastic', 'sabre'],
@@ -35,10 +37,14 @@ def main():
 
     env_config = args.pop('env_config')
     eval_config = args.pop('eval_config')
-    checkpoint_dir = args.pop('checkpoint_dir')
+    model_dir = args.pop('model_dir')
+    save_to = args.pop('save_to')
+
+    checkpoint_dir = str(get_latest_checkpoint_dir(model_dir))
 
     orchestrator = parse_eval_config(env_config, eval_config, checkpoint_dir, override_args=args)
     orchestrator.evaluate()
+    orchestrator.metrics_analyzer.pickle(save_to)
 
 
 if __name__ == '__main__':

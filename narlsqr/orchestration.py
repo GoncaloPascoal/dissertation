@@ -11,13 +11,9 @@ from math import inf
 from numbers import Real
 from typing import Final, Optional, Self, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import seaborn as sns
 from qiskit import QuantumCircuit, transpile
 from qiskit.transpiler import CouplingMap
-from ray.rllib import Policy
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.rllib.env import EnvContext
 from ray.tune import register_env
@@ -25,6 +21,7 @@ from ray.tune.logger import UnifiedLogger
 from ray.tune.result import DEFAULT_RESULTS_DIR
 from tqdm.rich import tqdm
 
+from narlsqr.analysis import MetricsAnalyzer
 from narlsqr.env import RoutingEnv
 from narlsqr.env.wrappers import EvaluationWrapper, TrainingWrapper
 from narlsqr.generators.circuit import CircuitGenerator, DatasetCircuitGenerator
@@ -260,7 +257,7 @@ class EvaluationOrchestrator:
 
     def __init__(
         self,
-        policy: Policy,
+        algorithm: PPO,
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
         error_rates: Iterable[float],
@@ -294,7 +291,7 @@ class EvaluationOrchestrator:
         error_rates = np.array(error_rates, copy=False)
         env.calibrate(error_rates)
 
-        self.policy = policy
+        self.algorithm = algorithm
         self.eval_env = EvaluationWrapper(
             env,
             circuit_generator,
@@ -311,15 +308,7 @@ class EvaluationOrchestrator:
         self.initial_layout = env.qubit_to_node.tolist()
         self.qiskit_coupling_map = CouplingMap(env.coupling_map.to_directed().edge_list())  # type: ignore
 
-        self.reliability_map = {}
-        for edge, edge_reliability in zip(env.coupling_map.edge_list(), 1.0 - env.error_rates):  # type: ignore
-            self.reliability_map[edge] = edge_reliability
-            self.reliability_map[edge[::-1]] = edge_reliability
-
-        self.metrics = {}
-
-    def log_metric(self, method: str, metric: str, value: Real):
-        self.metrics.setdefault(method, {}).setdefault(metric, []).append(value)
+        self.metrics_analyzer = MetricsAnalyzer()
 
     def log_circuit_metrics(
         self,
@@ -334,7 +323,7 @@ class EvaluationOrchestrator:
 
         def log_metric_checked(metric: str, value: Real):
             if metric not in exclude:
-                self.log_metric(method, metric, value)
+                self.metrics_analyzer.log_metric(method, metric, value)
 
         for gate in ['swap', 'bridge']:
             log_metric_checked(f'{gate}_count', routed_ops.get(gate, 0))
@@ -347,7 +336,7 @@ class EvaluationOrchestrator:
         log_metric_checked('cnot_count', cnot_count)
         log_metric_checked('added_cnot_count', cnot_count - original_cnot_count)
         log_metric_checked('depth', routed_circuit.depth())
-        log_metric_checked('reliability', reliability(routed_circuit, self.reliability_map))
+        log_metric_checked('reliability', reliability(routed_circuit, self.env.edge_to_reliability))
 
     def evaluate(self):
         progress = (
@@ -367,7 +356,7 @@ class EvaluationOrchestrator:
                 total_reward = 0.0
 
                 while not terminated:
-                    action, *_ = self.policy.compute_single_action(obs, explore=self.stochastic)
+                    action = self.algorithm.compute_single_action(obs, explore=self.stochastic)
                     obs, reward, terminated, *_ = self.eval_env.step(action)
                     total_reward += reward
 
@@ -378,7 +367,7 @@ class EvaluationOrchestrator:
                 if self.use_tqdm:
                     progress.update()
 
-            self.log_metric('rl', 'routing_time', time.perf_counter() - start_time)
+            self.metrics_analyzer.log_metric('rl', 'routing_time', time.perf_counter() - start_time)
 
             original_circuit = self.env.circuit
             self.log_circuit_metrics('rl', original_circuit, routed_circuit)
@@ -393,23 +382,8 @@ class EvaluationOrchestrator:
                     optimization_level=0,
                     seed_transpiler=self.seed,
                 )
-                self.log_metric(method, 'routing_time', time.perf_counter() - start_time)
+                self.metrics_analyzer.log_metric(method, 'routing_time', time.perf_counter() - start_time)
 
                 self.log_circuit_metrics(method, original_circuit, routed_circuit, exclude={'bridge_count'})
 
         progress.close()
-
-    def metric_as_df(self, metric: str) -> pd.DataFrame:
-        return pd.DataFrame({
-            method: method_data.get(metric, [])
-            for method, method_data in self.metrics.items()
-            if metric in method_data
-        })
-
-    def box_plot(self, metric: str):
-        sns.boxplot(self.metric_as_df(metric))
-        plt.show()
-
-    def kde_plot(self, metric: str):
-        sns.kdeplot(self.metric_as_df(metric))
-        plt.show()
