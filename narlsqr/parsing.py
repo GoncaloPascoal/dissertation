@@ -6,7 +6,7 @@ from typing import Any, Final, Optional
 import rustworkx as rx
 import yaml
 from qiskit.providers.models import BackendProperties
-from ray.rllib.algorithms.ppo import PPO
+from ray.rllib import Policy
 
 from narlsqr.env import CircuitMatrix, NoiseConfig, ObsModule, QubitInteractions, RoutingEnv
 from narlsqr.generators.circuit import (CircuitGenerator, DatasetCircuitGenerator, LayeredCircuitGenerator,
@@ -158,7 +158,7 @@ def parse_eval_config(
     env = parse_env_config(env_config_path)()
     config = parse_yaml(eval_config_path)
 
-    algorithm = PPO.from_checkpoint(checkpoint_dir)
+    policy = Policy.from_checkpoint(checkpoint_dir)
 
     error_rates = config.pop('error_rates')
     if isinstance(error_rates, str):
@@ -170,7 +170,7 @@ def parse_eval_config(
     circuit_generator = parse_circuit_generator(config.pop('circuit_generator'), env)
 
     args = dict(
-        algorithm=algorithm,
+        policy=policy,
         env=env,
         circuit_generator=circuit_generator,
         error_rates=error_rates,

@@ -14,6 +14,7 @@ from typing import Final, Optional, Self, cast
 import numpy as np
 from qiskit import QuantumCircuit, transpile
 from qiskit.transpiler import CouplingMap
+from ray.rllib import Policy
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.rllib.env import EnvContext
 from ray.tune import register_env
@@ -257,7 +258,7 @@ class EvaluationOrchestrator:
 
     def __init__(
         self,
-        algorithm: PPO,
+        policy: Policy,
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
         error_rates: Iterable[float],
@@ -291,7 +292,7 @@ class EvaluationOrchestrator:
         error_rates = np.array(error_rates, copy=False)
         env.calibrate(error_rates)
 
-        self.algorithm = algorithm
+        self.policy = policy
         self.eval_env = EvaluationWrapper(
             env,
             circuit_generator,
@@ -356,7 +357,7 @@ class EvaluationOrchestrator:
                 total_reward = 0.0
 
                 while not terminated:
-                    action = self.algorithm.compute_single_action(obs, explore=self.stochastic)
+                    action, *_ = self.policy.compute_single_action(obs, explore=self.stochastic)
                     obs, reward, terminated, *_ = self.eval_env.step(action)
                     total_reward += reward
 
