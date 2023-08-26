@@ -1,6 +1,8 @@
 
+import os
 import pickle
 from numbers import Real
+from pathlib import Path
 from typing import Self
 
 import pandas as pd
@@ -15,11 +17,14 @@ class MetricsAnalyzer:
         self.metrics = {}
 
     @classmethod
-    def unpickle(cls, path: str) -> Self:
+    def unpickle(cls, path: str | Path) -> Self:
         with open(path, 'rb') as f:
             return pickle.load(f)
 
-    def pickle(self, path: str):
+    def pickle(self, path: str | Path):
+        path = Path(path) if isinstance(path, str) else path
+        os.makedirs(path.parent, exist_ok=True)
+
         with open(path, 'wb') as f:
             pickle.dump(self, f)
 

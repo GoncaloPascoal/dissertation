@@ -2,13 +2,13 @@
 import copy
 import ctypes
 import os.path
-import pathlib
 import time
 from collections.abc import Collection, Iterable, Set
 from dataclasses import dataclass, field
 from datetime import datetime
 from math import inf
 from numbers import Real
+from pathlib import Path
 from typing import Final, Optional, Self, cast
 
 import numpy as np
@@ -38,21 +38,21 @@ class CheckpointConfig:
     model_dir: str
     interval: int = field(default=25, kw_only=True)
 
-def is_checkpoint(path: str | pathlib.Path) -> bool:
+def is_checkpoint(path: str | Path) -> bool:
     if isinstance(path, str):
-        path = pathlib.Path(path)
+        path = Path(path)
 
     return path.is_dir() and path.name.startswith('checkpoint')
 
-def get_checkpoint_iters(checkpoint_dir: str | pathlib.Path) -> int:
+def get_checkpoint_iters(checkpoint_dir: str | Path) -> int:
     if isinstance(checkpoint_dir, str):
-        checkpoint_dir = pathlib.Path(checkpoint_dir)
+        checkpoint_dir = Path(checkpoint_dir)
 
     return int(checkpoint_dir.name.removeprefix('checkpoint_'))
 
-def get_latest_checkpoint_dir(model_dir: str | pathlib.Path) -> pathlib.Path:
+def get_latest_checkpoint_dir(model_dir: str | Path) -> Path:
     if isinstance(model_dir, str):
-        model_dir = pathlib.Path(model_dir)
+        model_dir = Path(model_dir)
 
     return max((path for path in model_dir.iterdir() if path.is_dir()), key=get_checkpoint_iters)  # type: ignore
 
