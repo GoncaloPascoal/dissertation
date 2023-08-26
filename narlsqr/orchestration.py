@@ -350,12 +350,14 @@ class EvaluationOrchestrator:
         log_metric_checked('reliability', reliability(routed_circuit, self.reliability_map))
 
     def evaluate(self):
-        iterable = range(self.num_circuits)
-        if self.use_tqdm:
-            iterable = tqdm(iterable)
+        progress = (
+            tqdm(total=self.num_circuits * self.eval_env.evaluation_iters)
+            if self.use_tqdm else None
+        )
 
-        for _ in iterable:
+        for _ in range(self.num_circuits):
             start_time = time.perf_counter()
+
             best_reward = -inf
             routed_circuit = self.env.circuit.copy_empty_like()
 
@@ -372,6 +374,10 @@ class EvaluationOrchestrator:
                 if total_reward > best_reward:
                     best_reward = total_reward
                     routed_circuit = self.env.routed_circuit()
+                
+                if self.use_tqdm:
+                    progress.update()
+
             self.log_metric('rl', 'routing_time', time.perf_counter() - start_time)
 
             original_circuit = self.env.circuit
@@ -390,6 +396,8 @@ class EvaluationOrchestrator:
                 self.log_metric(method, 'routing_time', time.perf_counter() - start_time)
 
                 self.log_circuit_metrics(method, original_circuit, routed_circuit, exclude={'bridge_count'})
+
+        progress.close()
 
     def metric_as_df(self, metric: str) -> pd.DataFrame:
         return pd.DataFrame({
