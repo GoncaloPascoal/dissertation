@@ -11,12 +11,12 @@ noise_generator:
 seed: 0
 
 # Model
-hidden_layers: [512, 512]
-embedding_dim: 3
-entropy_coeff: 1.0e-3
+hidden_layers: [384, 384]
+embedding_dim: 4
+entropy_coeff: 5.0e-3
 minibatch_size: 2048
 batch_size: 32768
-sgd_iters: 8
+sgd_iters: 10
 lr_schedule:
     - [0, 1.0e-4]
     - [3_000_000, 5.0e-5]
