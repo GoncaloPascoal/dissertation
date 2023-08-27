@@ -85,23 +85,6 @@ def parse_real_file(path: str) -> QuantumCircuit:
     return qc
 
 
-def convert_real_to_qasm(src: str, dst_dir: Optional[str] = None, *, basis_gates: Optional[list[str]] = None):
-    """
-    Converts a ``.real`` file at :py:attr:`src` to OpenQASM, storing it in the :py:attr:`dst_dir` directory.
-    :param src: path to the ``.real`` file.
-    :param dst_dir: path to the directory where the ``.qasm`` file should be saved. If not specified, it will
-        correspond to the current working directory.
-    :param basis_gates: if not ``None``, decompose the circuit using the given set of basis gates.
-    """
-    dst_dir = os.getcwd() if dst_dir is None else dst_dir
-    file_name = Path(src).stem
-
-    qc = parse_real_file(src)
-    if basis_gates is not None:
-        qc = transpile(qc, basis_gates=basis_gates, optimization_level=0)
-    qc.qasm(filename=os.path.join(dst_dir, f'{file_name}.qasm'))
-
-
 def files_in_dir(path: str) -> list[str]:
     files = [os.path.join(path, f) for f in os.listdir(path)]
     return [f for f in files if os.path.isfile(f)]
@@ -112,14 +95,21 @@ def batch_convert_real_to_qasm(
     dst_dir: Optional[str] = None,
     *,
     basis_gates: Optional[list[str]] = None,
-    condition: Optional[Callable[[str], bool]] = None,
+    filter_fn: Optional[Callable[[QuantumCircuit], bool]] = None,
     use_tqdm: bool = False,
 ):
-    files = files_in_dir(src_dir)
+    dst_dir = os.getcwd() if dst_dir is None else dst_dir
 
+    files = files_in_dir(src_dir)
     if use_tqdm:
         files = tqdm(files)
 
     for file in files:
-        if condition is None or condition(file):
-            convert_real_to_qasm(file, dst_dir, basis_gates=basis_gates)
+        qc = parse_real_file(file)
+        if filter_fn is None or filter_fn(qc):
+            file_name = Path(file).stem
+
+            if basis_gates is not None:
+                qc = transpile(qc, basis_gates=basis_gates, optimization_level=0)
+
+            qc.qasm(filename=os.path.join(dst_dir, f'{file_name}.qasm'))
