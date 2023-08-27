@@ -15,17 +15,13 @@ def main():
 
     parser.add_argument('src_dir', help='directory containing the .real files to convert')
 
-    parser.add_argument('--dst-dir', metavar='P',
-                        help='directory where the OpenQASM files will be saved to ([dir]/qasm by default)')
+    parser.add_argument('--dst-dir', metavar='P', help='directory where the OpenQASM files will be saved to')
     parser.add_argument('--min-qubits', metavar='N', type=int, default=0,
                         help='minimum circuit qubit count (inclusive)')
     parser.add_argument('--max-qubits', metavar='N', type=int, default=10_000,
                         help='maximum circuit qubit count (inclusive)')
 
     args = parser.parse_args()
-
-    if args.dst_dir is None:
-        args.dst_dir = os.path.join(args.src_dir, 'qasm')
 
     if args.min_qubits > args.max_qubits:
         raise ValueError('Minimum qubit count cannot be greater than maximum qubit count')

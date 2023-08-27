@@ -99,6 +99,7 @@ def batch_convert_real_to_qasm(
     use_tqdm: bool = False,
 ):
     dst_dir = os.getcwd() if dst_dir is None else dst_dir
+    os.makedirs(dst_dir, exist_ok=True)
 
     files = files_in_dir(src_dir)
     if use_tqdm:
@@ -110,6 +111,6 @@ def batch_convert_real_to_qasm(
             file_name = Path(file).stem
 
             if basis_gates is not None:
-                qc = transpile(qc, basis_gates=basis_gates, optimization_level=0)
+                qc = transpile(qc, basis_gates=basis_gates, optimization_level=2)
 
             qc.qasm(filename=os.path.join(dst_dir, f'{file_name}.qasm'))
