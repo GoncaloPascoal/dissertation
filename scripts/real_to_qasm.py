@@ -1,8 +1,9 @@
 
-import os
+import warnings
 from argparse import ArgumentParser
 
 from qiskit import QuantumCircuit
+from tqdm import TqdmExperimentalWarning
 
 from narlsqr.revlib import batch_convert_real_to_qasm
 from narlsqr.utils import IBM_BASIS_GATES
@@ -28,6 +29,8 @@ def main():
 
     def filter_fn(qc: QuantumCircuit) -> bool:
         return args.min_qubits <= qc.num_qubits <= args.max_qubits
+
+    warnings.filterwarnings('ignore', category=TqdmExperimentalWarning)
 
     batch_convert_real_to_qasm(
         args.src_dir,

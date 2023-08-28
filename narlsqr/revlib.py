@@ -111,6 +111,6 @@ def batch_convert_real_to_qasm(
             file_name = Path(file).stem
 
             if basis_gates is not None:
-                qc = transpile(qc, basis_gates=basis_gates, optimization_level=2)
+                qc = transpile(qc, basis_gates=basis_gates, optimization_level=0)
 
             qc.qasm(filename=os.path.join(dst_dir, f'{file_name}.qasm'))
