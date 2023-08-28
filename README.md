@@ -1,6 +1,6 @@
 
 <div align="center">
-  <h1>Noise-Resilient Reinforcement Learning Strategies for Quantum Compiling</h1>
+  <h1>Noise-Adaptive Reinforcement Learning Strategies for Qubit Routing</h1>
   <h2>Master's Dissertation</h2>
 
   Gonçalo Pascoal<br>

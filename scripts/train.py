@@ -13,7 +13,7 @@ from narlsqr.parsing import parse_train_config
 def main():
     parser = ArgumentParser(
         'train',
-        description='Noise-Resilient Reinforcement Learning Strategies for Quantum Compiling (model training script)',
+        description='Noise-Adaptive Reinforcement Learning Strategies for Qubit Routing (model training script)',
     )
 
     parser.add_argument('env_config', help='environment configuration file')

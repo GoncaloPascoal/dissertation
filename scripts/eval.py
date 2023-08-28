@@ -9,8 +9,8 @@ from narlsqr.orchestration import get_latest_checkpoint_dir
 from narlsqr.parsing import parse_eval_config
 
 def main():
-    parser = ArgumentParser('eval', description='Noise-Resilient Reinforcement Learning Strategies for Quantum '
-                                                'Compiling (model evaluation script)')
+    parser = ArgumentParser('eval', description='Noise-Adaptive Reinforcement Learning Strategies for Qubit '
+                                                'Routing (model evaluation script)')
 
     parser.add_argument('env_config', help='environment configuration file')
     parser.add_argument('eval_config', help='evaluation configuration file')
