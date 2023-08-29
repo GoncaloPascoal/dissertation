@@ -264,7 +264,7 @@ class EvaluationOrchestrator:
         error_rates: Iterable[float],
         *,
         stochastic: bool = True,
-        evaluation_iters: int = 10,
+        evaluation_episodes: int = 10,
         num_circuits: Optional[int] = None,
         routing_methods: str | Collection[str] = 'sabre',
         use_tqdm: bool = False,
@@ -277,13 +277,13 @@ class EvaluationOrchestrator:
                 num_circuits = 100
 
         if num_circuits <= 0:
-            raise ValueError(f'Number of evaluation circuits must be positive, got {num_circuits}')
+            raise ValueError(f'Number of circuits must be positive, got {num_circuits}')
 
         if not stochastic:
-            evaluation_iters = 1
+            evaluation_episodes = 1
 
-        if evaluation_iters <= 0:
-            raise ValueError(f'Evaluation iterations must be positive, got {evaluation_iters}')
+        if evaluation_episodes <= 0:
+            raise ValueError(f'Evaluation episodes must be positive, got {evaluation_episodes}')
 
         if seed is not None:
             seed_default_generators(seed)
@@ -296,7 +296,7 @@ class EvaluationOrchestrator:
         self.eval_env = EvaluationWrapper(
             env,
             circuit_generator,
-            evaluation_iters=evaluation_iters,
+            evaluation_episodes=evaluation_episodes,
         )
 
         self.stochastic = stochastic

@@ -81,7 +81,7 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
 
     :param env: :py:class:`RoutingEnv` to wrap.
     :param circuit_generator: Random circuit generator to be used during training.
-    :param evaluation_iters: Number of evaluation iterations per generated circuit.
+    :param evaluation_episodes: Number of evaluation episodes per generated circuit.
 
     :ivar current_iter: Current training iteration.
     """
@@ -92,10 +92,10 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
         self,
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
-        evaluation_iters: int = 10,
+        evaluation_episodes: int = 10,
     ):
         self.circuit_generator = circuit_generator
-        self.evaluation_iters = evaluation_iters
+        self.evaluation_iters = evaluation_episodes
 
         super().__init__(env)
 

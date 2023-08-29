@@ -17,8 +17,8 @@ def main():
 
     parser.add_argument('-m', '--model-dir', metavar='P', required=True, help='path to trained model')
     parser.add_argument('--save-to', metavar='P', required=True, help='path where metrics should be saved to')
-    parser.add_argument('-i', '--evaluation-iters', metavar='N', type=int, default=argparse.SUPPRESS,
-                        help='evaluation iterations per circuit')
+    parser.add_argument('-e', '--evaluation-episodes', metavar='N', type=int, default=argparse.SUPPRESS,
+                        help='evaluation episodes per circuit')
     parser.add_argument('-r', '--routing-methods', nargs='+', choices=['basic', 'stochastic', 'sabre'],
                         default=argparse.SUPPRESS, help='routing method(s) for Qiskit compiler')
     parser.add_argument('-s', '--seed', type=int, default=argparse.SUPPRESS, help='seed for random number generators')
