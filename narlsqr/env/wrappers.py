@@ -1,14 +1,19 @@
-from collections.abc import Iterable
+
 from typing import Optional, Any
 
 import gymnasium as gym
 import numpy as np
 from qiskit import transpile
+from qiskit.converters import circuit_to_dag
+from qiskit.providers.models import BackendProperties
+from qiskit.transpiler import CouplingMap
+from qiskit.transpiler.passes import NoiseAdaptiveLayout
 
-from narlsqr.generators.circuit import CircuitGenerator
 from narlsqr.env import RoutingEnv, RoutingObs
-from narlsqr.generators.noise import NoiseGenerator
-from narlsqr.utils import IBM_BASIS_GATES
+from narlsqr.generators.circuit import CircuitGenerator
+from narlsqr.generators.noise import NoiseGenerator, get_error_rates_from_backend_properties
+from narlsqr.utils import IBM_BASIS_GATES, qubits_to_indices
+
 
 class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
     """
@@ -92,10 +97,18 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
         self,
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
+        backend_properties: BackendProperties,
         evaluation_episodes: int = 10,
     ):
         self.circuit_generator = circuit_generator
         self.evaluation_iters = evaluation_episodes
+        self.backend_properties = backend_properties
+
+        self.layout_pass = NoiseAdaptiveLayout(backend_properties)
+        self.qiskit_coupling_map = CouplingMap(env.coupling_map.to_directed().edge_list())
+
+        error_rates = np.array(get_error_rates_from_backend_properties(backend_properties), copy=False)
+        env.calibrate(error_rates)
 
         super().__init__(env)
 
@@ -114,6 +127,12 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
                 optimization_level=0,
                 seed_transpiler=0,
             )
+
+            self.layout_pass.run(circuit_to_dag(self.env.circuit))
+            noise_adaptive_layout = self.layout_pass.property_set['layout'].get_physical_bits()
+
+            qargs = tuple(noise_adaptive_layout[i] for i in range(self.env.num_qubits))
+            self.env.initial_mapping = np.array(qubits_to_indices(self.env.circuit, qargs))
 
         self.current_iter += 1
 

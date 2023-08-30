@@ -232,7 +232,11 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         if self.commutation_analysis:
             self.commutation_pass.run(self.dag)
 
-        self._reset_state()
+        self.node_to_qubit = self.initial_mapping.copy()
+        for node, qubit in enumerate(self.node_to_qubit):
+            self.qubit_to_node[qubit] = node
+
+        self._schedule_gates()
 
         return self.current_obs(), {}
 
@@ -501,14 +505,6 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             self.edge_to_log_reliability[(middle, target)] +
             self.edge_to_log_reliability[(control, middle)]
         ) + self.added_gate_reward
-
-    def _reset_state(self):
-        self.node_to_qubit = self.initial_mapping.copy()
-
-        for node, qubit in enumerate(self.node_to_qubit):
-            self.qubit_to_node[qubit] = node
-
-        self._schedule_gates()
 
 
 class ObsModule(ABC):

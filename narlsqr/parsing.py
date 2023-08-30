@@ -12,8 +12,7 @@ from ray.rllib.policy.sample_batch import DEFAULT_POLICY_ID
 from narlsqr.env import CircuitMatrix, NoiseConfig, ObsModule, QubitInteractions, RoutingEnv
 from narlsqr.generators.circuit import (CircuitGenerator, DatasetCircuitGenerator, LayeredCircuitGenerator,
                                         RandomCircuitGenerator)
-from narlsqr.generators.noise import KdeNoiseGenerator, NoiseGenerator, UniformNoiseGenerator, \
-    get_error_rates_from_backend_properties
+from narlsqr.generators.noise import KdeNoiseGenerator, NoiseGenerator, UniformNoiseGenerator
 from narlsqr.orchestration import CheckpointConfig, EvaluationOrchestrator, TrainingOrchestrator
 from narlsqr.topology import grid_topology, h_topology, ibm_16q_topology, ibm_27q_topology, linear_topology, t_topology
 
@@ -161,12 +160,10 @@ def parse_eval_config(
 
     policy = Policy.from_checkpoint(checkpoint_dir)[DEFAULT_POLICY_ID]
 
-    error_rates = config.pop('error_rates')
-    if isinstance(error_rates, str):
-        with open(error_rates, 'r') as f:
-            data = json.load(f)
-        backend_properties = BackendProperties.from_dict(data)
-        error_rates = get_error_rates_from_backend_properties(backend_properties)
+    calibration_data = config.pop('calibration_data')
+    with open(calibration_data, 'r') as f:
+        data = json.load(f)
+    backend_properties = BackendProperties.from_dict(data)
 
     circuit_generator = parse_circuit_generator(config.pop('circuit_generator'), env)
 
@@ -174,7 +171,7 @@ def parse_eval_config(
         policy=policy,
         env=env,
         circuit_generator=circuit_generator,
-        error_rates=error_rates,
+        backend_properties=backend_properties,
         **config,
     )
     args.update(override_args)

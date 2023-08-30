@@ -1,11 +1,10 @@
 
 circuit_generator:
-  type: 'random'
+  type: 'dataset'
   args:
-    num_gates: 64
+    path: 'data/circuits/27q'
 
 routing_methods: ['basic', 'stochastic', 'sabre']
 calibration_data: 'data/calibration/mumbai.json'
-num_circuits: 200
 use_tqdm: true
 seed: 0

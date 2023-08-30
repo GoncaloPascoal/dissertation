@@ -5,7 +5,7 @@ circuit_generator:
     num_gates: 64
 
 routing_methods: ['basic', 'stochastic', 'sabre']
-error_rates: 'data/calibration/belem.json'
+calibration_data: 'data/calibration/belem.json'
 num_circuits: 200
 use_tqdm: true
 seed: 0

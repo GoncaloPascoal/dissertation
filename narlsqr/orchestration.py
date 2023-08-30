@@ -3,7 +3,7 @@ import copy
 import ctypes
 import os.path
 import time
-from collections.abc import Collection, Iterable, Set
+from collections.abc import Collection, Set
 from dataclasses import dataclass, field
 from datetime import datetime
 from math import inf
@@ -13,7 +13,7 @@ from typing import Final, Optional, Self, cast
 
 import numpy as np
 from qiskit import QuantumCircuit, transpile
-from qiskit.transpiler import CouplingMap
+from qiskit.providers.models import BackendProperties
 from ray.rllib import Policy
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.rllib.env import EnvContext
@@ -260,10 +260,10 @@ class EvaluationOrchestrator:
         policy: Policy,
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
-        error_rates: Iterable[float],
+        backend_properties: BackendProperties,
         *,
-        stochastic: bool = True,
         evaluation_episodes: int = 10,
+        stochastic: bool = True,
         num_circuits: Optional[int] = None,
         routing_methods: str | Collection[str] = 'sabre',
         use_tqdm: bool = False,
@@ -288,13 +288,11 @@ class EvaluationOrchestrator:
             seed_default_generators(seed)
             circuit_generator.seed(seed)
 
-        error_rates = np.array(error_rates, copy=False)
-        env.calibrate(error_rates)
-
         self.policy = policy
         self.eval_env = EvaluationWrapper(
             env,
             circuit_generator,
+            backend_properties,
             evaluation_episodes=evaluation_episodes,
         )
 
@@ -305,8 +303,6 @@ class EvaluationOrchestrator:
         self.seed = seed
 
         self.env = self.eval_env.env
-        self.initial_layout = env.qubit_to_node.tolist()
-        self.qiskit_coupling_map = CouplingMap(env.coupling_map.to_directed().edge_list())  # type: ignore
 
         self.metrics_analyzer = MetricsAnalyzer()
 
@@ -388,12 +384,13 @@ class EvaluationOrchestrator:
             original_circuit = self.env.circuit
             self.log_circuit_metrics('rl', original_circuit, routed_circuit)
 
+            initial_layout = self.env.qubit_to_node.tolist()
             for method in self.routing_methods:
                 start_time = time.perf_counter()
                 routed_circuit = transpile(
                     original_circuit,
-                    coupling_map=self.qiskit_coupling_map,
-                    initial_layout=self.initial_layout,
+                    coupling_map=self.eval_env.qiskit_coupling_map,
+                    initial_layout=initial_layout,
                     routing_method=method,
                     optimization_level=0,
                     seed_transpiler=self.seed,
