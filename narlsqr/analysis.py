@@ -1,6 +1,7 @@
 
 import os
 import pickle
+from collections import OrderedDict
 from numbers import Real
 from pathlib import Path
 from typing import Self
@@ -12,6 +13,14 @@ from matplotlib.axes import Axes
 
 class MetricsAnalyzer:
     metrics: dict[str, dict[str, list[Real]]]
+
+    ROUTING_METHOD_NAMES = OrderedDict([
+        ('rl', 'RL'),
+        ('rl_noise_unaware', 'RL (Noise Unaware)'),
+        ('sabre', 'SabreSwap'),
+        ('stochastic', 'StochasticSwap'),
+        ('basic', 'BasicSwap'),
+    ])
 
     def __init__(self):
         self.metrics = {}
@@ -31,15 +40,20 @@ class MetricsAnalyzer:
     def log_metric(self, method: str, metric: str, value: Real):
         self.metrics.setdefault(method, {}).setdefault(metric, []).append(value)
 
-    def metric_as_df(self, metric: str) -> pd.DataFrame:
-        return pd.DataFrame({
+    def metric_as_df(self, metric: str, *, rename_routing_methods: bool = False) -> pd.DataFrame:
+        df = pd.DataFrame({
             method: method_data.get(metric, [])
             for method, method_data in self.metrics.items()
             if metric in method_data
-        })
+        }).reindex(columns=MetricsAnalyzer.ROUTING_METHOD_NAMES)
+
+        if rename_routing_methods:
+            df.rename(columns=MetricsAnalyzer.ROUTING_METHOD_NAMES, inplace=True)
+
+        return df
 
     def box_plot(self, metric: str, **kwargs) -> Axes:
-        return sns.boxplot(self.metric_as_df(metric), **kwargs)
+        return sns.boxplot(self.metric_as_df(metric, rename_routing_methods=True), **kwargs)
 
     def violin_plot(self, metric: str, **kwargs) -> Axes:
-        return sns.violinplot(self.metric_as_df(metric), **kwargs)
+        return sns.violinplot(self.metric_as_df(metric, rename_routing_methods=True), **kwargs)

@@ -25,7 +25,7 @@ def indices_to_qubits(qc: QuantumCircuit, indices: Iterable[int]) -> tuple[Qubit
     return tuple(qc.qubits[i] for i in indices)
 
 
-def reliability(circuit: QuantumCircuit, reliability_map: dict[tuple[int, ...], float]) -> float:
+def circuit_reliability(circuit: QuantumCircuit, reliability_map: dict[tuple[int, ...], float]) -> float:
     return functools.reduce(
         operator.mul,
         [

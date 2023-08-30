@@ -4,7 +4,8 @@ circuit_generator:
   args:
     num_gates: 64
 
+routing_methods: ['basic', 'stochastic', 'sabre']
 error_rates: 'data/calibration/guadalupe.json'
-num_circuits: 100
+num_circuits: 200
 use_tqdm: true
 seed: 0

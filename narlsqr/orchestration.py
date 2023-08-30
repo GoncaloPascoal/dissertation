@@ -29,7 +29,7 @@ from narlsqr.generators.circuit import CircuitGenerator, DatasetCircuitGenerator
 from narlsqr.generators.noise import NoiseGenerator
 from narlsqr.rllib.action_mask_model import ActionMaskModel
 from narlsqr.rllib.callbacks import RoutingCallbacks
-from narlsqr.utils import Factory, reliability, seed_default_generators
+from narlsqr.utils import Factory, circuit_reliability, seed_default_generators
 
 ROUTING_ENV_NAME: Final[str] = 'RoutingEnv'
 
@@ -254,7 +254,6 @@ class TrainingOrchestrator:
 
 class EvaluationOrchestrator:
     reliability_map: dict[tuple[int, int], float]
-    metrics: dict[str, dict[str, list[Real]]]
 
     def __init__(
         self,
@@ -333,11 +332,27 @@ class EvaluationOrchestrator:
 
         original_cnot_count = original_circuit.count_ops().get('cx', 0)
         cnot_count = routed_circuit.count_ops().get('cx', 0)
+        added_cnot_count = cnot_count - original_cnot_count
 
+        original_depth = original_circuit.depth()
+        depth = routed_circuit.depth()
+
+        reliability = circuit_reliability(routed_circuit, self.env.edge_to_reliability)
+        log_reliability = np.emath.logn(self.env.noise_config.log_base, reliability)
+
+        log_metric_checked('original_cnot_count', original_cnot_count)
         log_metric_checked('cnot_count', cnot_count)
-        log_metric_checked('added_cnot_count', cnot_count - original_cnot_count)
-        log_metric_checked('depth', routed_circuit.depth())
-        log_metric_checked('reliability', reliability(routed_circuit, self.env.edge_to_reliability))
+        log_metric_checked('added_cnot_count', added_cnot_count)
+
+        log_metric_checked('original_depth', original_depth)
+        log_metric_checked('depth', depth)
+
+        log_metric_checked('reliability', reliability)
+        log_metric_checked('log_reliability', log_reliability)
+
+        log_metric_checked('normalized_added_cnot_count', added_cnot_count / original_cnot_count)
+        log_metric_checked('normalized_depth', depth / original_depth)
+        log_metric_checked('normalized_log_reliability', log_reliability / original_cnot_count)
 
     def evaluate(self):
         progress = (
