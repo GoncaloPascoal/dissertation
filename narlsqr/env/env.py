@@ -13,7 +13,7 @@ import rustworkx as rx
 from gymnasium import spaces
 from nptyping import Int8, NDArray
 from ordered_set import OrderedSet
-from qiskit import AncillaRegister, QuantumCircuit
+from qiskit import QuantumCircuit
 from qiskit.circuit import Operation, Qubit
 from qiskit.circuit.library import CXGate, SwapGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
@@ -221,9 +221,6 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         if self.log_metrics:
             self.metrics.clear()
             self.metrics['reliability'] = 1.0
-
-        if self.circuit.num_qubits < self.num_qubits:
-            self.circuit.add_register(AncillaRegister(self.num_qubits - self.circuit.num_qubits))
 
         self.dag = circuit_to_dag(self.circuit)
         self.routed_gates = []

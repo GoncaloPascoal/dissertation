@@ -3,18 +3,29 @@ from abc import ABC, abstractmethod
 from typing import Optional, Self
 
 import numpy as np
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit, AncillaRegister
 
 from narlsqr.revlib import files_in_dir
 
 
 class CircuitGenerator(ABC):
-    def __init__(self, *, seed: Optional[int] = None):
+    def __init__(self, num_qubits: int, *, seed: Optional[int] = None):
+        self.num_qubits = num_qubits
         self.rng = np.random.default_rng(seed)
 
-    @abstractmethod
     def generate(self) -> QuantumCircuit:
         """Generate a quantum circuit."""
+        qc = self._generate()
+
+        if qc.num_qubits < self.num_qubits:
+            qc.add_register(AncillaRegister(self.num_qubits - qc.num_qubits))
+        elif qc.num_qubits > self.num_qubits:
+            raise ValueError(f'Generated circuit has too many qubits: expected {self.num_qubits}, got {qc.num_qubits}')
+
+        return qc
+
+    @abstractmethod
+    def _generate(self) -> QuantumCircuit:
         raise NotImplementedError
 
     def seed(self, seed: Optional[int] = None):
@@ -31,17 +42,16 @@ class RandomCircuitGenerator(CircuitGenerator):
     """
 
     def __init__(self, num_qubits: int, num_gates: int, *, seed: Optional[int] = None):
-        super().__init__(seed=seed)
+        super().__init__(num_qubits, seed=seed)
 
         if num_qubits < 2:
             raise ValueError(f'Number of qubits must be greater or equal than 2, got {num_qubits}')
         if num_gates <= 0:
             raise ValueError(f'Number of gates must be positive, got {num_gates}')
 
-        self.num_qubits = num_qubits
         self.num_gates = num_gates
 
-    def generate(self) -> QuantumCircuit:
+    def _generate(self) -> QuantumCircuit:
         qc = QuantumCircuit(self.num_qubits)
 
         for _ in range(self.num_gates):
@@ -63,7 +73,7 @@ class LayeredCircuitGenerator(CircuitGenerator):
     """
 
     def __init__(self, num_qubits: int, num_layers: int = 1, density: float = 1.0, *, seed: Optional[int] = None):
-        super().__init__(seed=seed)
+        super().__init__(num_qubits, seed=seed)
 
         if num_qubits < 2:
             raise ValueError(f'Number of qubits must be greater or equal than 2, got {num_qubits}')
@@ -72,13 +82,12 @@ class LayeredCircuitGenerator(CircuitGenerator):
         if not (0.0 <= density <= 1.0):
             raise ValueError(f'Density must be a value between 0 and 1, got {density}')
 
-        self.num_qubits = num_qubits
         self.num_layers = num_layers
         self.density = density
 
         self.cnots_per_layer = int(density * num_qubits // 2)
 
-    def generate(self) -> QuantumCircuit:
+    def _generate(self) -> QuantumCircuit:
         qc = QuantumCircuit(self.num_qubits)
         qubits = list(range(self.num_qubits))
 
@@ -98,8 +107,15 @@ class DatasetCircuitGenerator(CircuitGenerator):
     :param random: If ``True``, return circuits in a random order.
     """
 
-    def __init__(self, dataset: list[QuantumCircuit], *, random: bool = False, seed: Optional[int] = None):
-        super().__init__(seed=seed)
+    def __init__(
+        self,
+        num_qubits: int,
+        dataset: list[QuantumCircuit],
+        *,
+        random: bool = False,
+        seed: Optional[int] = None,
+    ):
+        super().__init__(num_qubits, seed=seed)
 
         if not dataset:
             raise ValueError('Dataset cannot be empty')
@@ -109,11 +125,11 @@ class DatasetCircuitGenerator(CircuitGenerator):
         self.idx = 0
 
     @classmethod
-    def from_dir(cls, path: str, *, random: bool = False, seed: Optional[int] = None) -> Self:
+    def from_dir(cls, num_qubits: int, path: str, *, random: bool = False, seed: Optional[int] = None) -> Self:
         dataset = [QuantumCircuit.from_qasm_file(file_path) for file_path in files_in_dir(path)]
-        return cls(dataset, random=random, seed=seed)
+        return cls(num_qubits, dataset, random=random, seed=seed)
 
-    def generate(self) -> QuantumCircuit:
+    def _generate(self) -> QuantumCircuit:
         if self.random:
             qc = self.rng.choice(self.dataset)
         else:
