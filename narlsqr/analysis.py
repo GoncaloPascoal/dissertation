@@ -16,7 +16,7 @@ class MetricsAnalyzer:
 
     ROUTING_METHOD_NAMES = OrderedDict([
         ('rl', 'RL'),
-        ('rl_noise_unaware', 'RL (Noise Unaware)'),
+        ('rl_noise_unaware', 'RL\n(Noise Unaware)'),
         ('sabre', 'SabreSwap'),
         ('stochastic', 'StochasticSwap'),
         ('basic', 'BasicSwap'),
