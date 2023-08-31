@@ -137,6 +137,7 @@ class TrainingOrchestrator:
                 num_sgd_iter=sgd_iters,
                 vf_loss_coeff=vf_loss_coeff,
                 entropy_coeff=entropy_coeff,
+                kl_coeff=0.0,
                 clip_param=0.2,
                 grad_clip=0.5,
                 _enable_learner_api=False,
