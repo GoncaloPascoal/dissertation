@@ -362,9 +362,13 @@ class EvaluationOrchestrator:
 
             best_reward = -inf
             routed_circuit = self.env.circuit.copy_empty_like()
+            initial_layout = None
 
             for _ in range(self.eval_env.evaluation_iters):
                 obs, _ = self.eval_env.reset()
+                if initial_layout is None:
+                    initial_layout = self.env.qubit_to_node.tolist()
+
                 terminated = False
                 total_reward = 0.0
 
@@ -385,7 +389,6 @@ class EvaluationOrchestrator:
             original_circuit = self.env.circuit
             self.log_circuit_metrics('rl', original_circuit, routed_circuit)
 
-            initial_layout = self.env.qubit_to_node.tolist()
             for method in self.routing_methods:
                 start_time = time.perf_counter()
                 routed_circuit = transpile(

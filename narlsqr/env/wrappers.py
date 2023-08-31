@@ -3,16 +3,15 @@ from typing import Optional, Any
 
 import gymnasium as gym
 import numpy as np
-from qiskit import transpile
 from qiskit.converters import circuit_to_dag
 from qiskit.providers.models import BackendProperties
-from qiskit.transpiler import CouplingMap
+from qiskit.transpiler import CouplingMap, TranspilerError
 from qiskit.transpiler.passes import NoiseAdaptiveLayout
 
 from narlsqr.env import RoutingEnv, RoutingObs
 from narlsqr.generators.circuit import CircuitGenerator
 from narlsqr.generators.noise import NoiseGenerator, get_error_rates_from_backend_properties
-from narlsqr.utils import IBM_BASIS_GATES, qubits_to_indices
+from narlsqr.utils import qubits_to_indices
 
 
 class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
@@ -121,18 +120,17 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
         options: Optional[dict[str, Any]] = None,
     ) -> tuple[RoutingObs, dict[str, Any]]:
         if self.current_iter % self.evaluation_iters == 0:
-            self.env.circuit = transpile(
-                self.circuit_generator.generate(),
-                basis_gates=IBM_BASIS_GATES,
-                optimization_level=0,
-                seed_transpiler=0,
-            )
+            self.env.circuit = self.circuit_generator.generate()
 
-            self.layout_pass.run(circuit_to_dag(self.env.circuit))
-            noise_adaptive_layout = self.layout_pass.property_set['layout'].get_physical_bits()
+            try:
+                self.layout_pass.run(circuit_to_dag(self.env.circuit))
+                noise_adaptive_layout = self.layout_pass.property_set['layout'].get_physical_bits()
 
-            qargs = tuple(noise_adaptive_layout[i] for i in range(self.env.num_qubits))
-            self.env.initial_mapping = np.array(qubits_to_indices(self.env.circuit, qargs))
+                qargs = tuple(noise_adaptive_layout[i] for i in range(self.env.num_qubits))
+                self.env.initial_mapping = np.array(qubits_to_indices(self.env.circuit, qargs))
+            except TranspilerError:
+                print('Exception occurred during NoiseAdaptiveLayout, defaulting to trivial initial mapping')
+                self.env.initial_mapping = np.arange(self.env.num_qubits)
 
         self.current_iter += 1
 
