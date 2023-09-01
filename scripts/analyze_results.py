@@ -59,6 +59,38 @@ def random_circuits_analysis(device: str):
     format_plot(ax, 'Routing Algorithm', 'Log Reliability')
     save_current_plot(f'{prefix}/log_reliability.pdf')
 
+def real_circuits_analysis(device: str):
+    prefix = f'{ANALYSIS_DIR}/{device}/real'
+    os.makedirs(prefix, exist_ok=True)
+
+    metrics_analyzer = MetricsAnalyzer.unpickle(f'{RESULTS_DIR}/{device}/real.pickle')
+    noise_unaware = MetricsAnalyzer.unpickle(f'{RESULTS_DIR}/{device}/real_nu.pickle')
+    metrics_analyzer.metrics['rl_noise_unaware'] = noise_unaware.metrics['rl']
+
+    for metric in ['normalized_added_cnot_count', 'normalized_depth', 'normalized_log_reliability']:
+        df = metrics_analyzer.metric_as_df(metric)
+
+        float_format = '.4f' if metric == 'normalized_log_reliability' else '.3f'
+        mean = [f'{x:{float_format}}' for x in df.mean()]
+        std = [f'{x:{float_format}}' for x in df.std()]
+
+        with open(f'{prefix}/{metric.removeprefix("normalized_")}.txt', 'w') as f:
+            f.write(f'Mean: {" & ".join(mean)}\n')
+            f.write(f'Std: {" & ".join(std)}\n')
+
+    ax = metrics_analyzer.box_plot('normalized_added_cnot_count')
+    ax.tick_params(labelsize=16)
+    format_plot(ax, 'Routing Algorithm', 'Additional CNOT Gates (Normalized)')
+    save_current_plot(f'{prefix}/added_cnot_count.pdf')
+
+    ax = metrics_analyzer.box_plot('normalized_depth')
+    format_plot(ax, 'Routing Algorithm', 'Depth (Normalized)')
+    save_current_plot(f'{prefix}/depth.pdf')
+
+    ax = metrics_analyzer.box_plot('normalized_log_reliability')
+    format_plot(ax, 'Routing Algorithm', 'Log Reliability (Normalized)')
+    save_current_plot(f'{prefix}/log_reliability.pdf')
+
 
 def swap_vs_bridge():
     prefix = ANALYSIS_DIR
@@ -114,37 +146,61 @@ def swap_vs_bridge():
     save_current_plot(f'{prefix}/swap_vs_bridge.pdf')
 
 
-def real_circuits_analysis(device: str):
-    prefix = f'{ANALYSIS_DIR}/{device}/real'
+def evaluation_episodes_analysis():
+    prefix = ANALYSIS_DIR
     os.makedirs(prefix, exist_ok=True)
+    episodes_list = [1, 2, 4, 8, 16]
 
-    metrics_analyzer = MetricsAnalyzer.unpickle(f'{RESULTS_DIR}/{device}/real.pickle')
-    noise_unaware = MetricsAnalyzer.unpickle(f'{RESULTS_DIR}/{device}/real_nu.pickle')
-    metrics_analyzer.metrics['rl_noise_unaware'] = noise_unaware.metrics['rl']
+    results_prefix = f'{RESULTS_DIR}/nairobi/episodes'
 
-    for metric in ['normalized_added_cnot_count', 'normalized_depth', 'normalized_log_reliability']:
-        df = metrics_analyzer.metric_as_df(metric)
+    metrics_analyzer = MetricsAnalyzer.unpickle(f'{results_prefix}/deterministic.pickle')
+    metrics = metrics_analyzer.metrics
 
-        float_format = '.4f' if metric == 'normalized_log_reliability' else '.3f'
-        mean = [f'{x:{float_format}}' for x in df.mean()]
-        std = [f'{x:{float_format}}' for x in df.std()]
+    metrics.pop('stochastic')
+    metrics.pop('basic')
 
-        with open(f'{prefix}/{metric.removeprefix("normalized_")}.txt', 'w') as f:
-            f.write(f'Mean: {" & ".join(mean)}\n')
-            f.write(f'Std: {" & ".join(std)}\n')
+    metrics['deterministic'] = metrics.pop('rl')
 
-    ax = metrics_analyzer.box_plot('normalized_added_cnot_count')
-    ax.tick_params(labelsize=16)
-    format_plot(ax, 'Routing Algorithm', 'Additional CNOT Gates (Normalized)')
-    save_current_plot(f'{prefix}/added_cnot_count.pdf')
+    for num_episodes in episodes_list:
+        name = f'stochastic_{num_episodes}ep'
+        stochastic = MetricsAnalyzer.unpickle(f'{results_prefix}/{name}.pickle')
+        metrics[name] = stochastic.metrics['rl']
 
-    ax = metrics_analyzer.box_plot('normalized_depth')
-    format_plot(ax, 'Routing Algorithm', 'Depth (Normalized)')
-    save_current_plot(f'{prefix}/depth.pdf')
+    df = metrics_analyzer.metric_as_df('log_reliability')
+    rename_map = dict(
+        deterministic='Deterministic',
+        **{f'stochastic_{n}ep': f'{n} Ep.' for n in episodes_list},
+        sabre='SABRE',
+    )
+    df = df.reindex(columns=rename_map)
+    df.rename(columns=rename_map, inplace=True)
 
-    ax = metrics_analyzer.box_plot('normalized_log_reliability')
-    format_plot(ax, 'Routing Algorithm', 'Log Reliability (Normalized)')
-    save_current_plot(f'{prefix}/log_reliability.pdf')
+    palette = sns.color_palette('flare', n_colors=len(episodes_list))
+    palette.insert(0, (0.58, 0.76, 0.42))
+    palette.append((0.26, 0.56, 0.86))
+
+    ax = sns.boxplot(df, palette=palette)
+    format_plot(ax, 'Routing Method', 'Log Reliability')
+    ax.get_figure().set_size_inches(14.0, 11.0)
+
+    save_current_plot(f'{prefix}/evaluation_episodes.pdf')
+
+
+def routing_time():
+    times_rl = []
+    times_sabre = []
+
+    for device in DEVICES:
+        metrics_analyzer = MetricsAnalyzer.unpickle(f'{RESULTS_DIR}/{device}/random.pickle')
+        df = metrics_analyzer.metric_as_df('routing_time')
+
+        times_rl.append(f'{df["rl"].mean():.3f}')
+        times_sabre.append(f'{df["sabre"].mean():.5f}')
+
+    with open(f'{ANALYSIS_DIR}/routing_time.txt', 'w') as f:
+        f.write(' & '.join(times_rl))
+        f.write('\n')
+        f.write(' & '.join(times_sabre))
 
 
 def main():
@@ -156,6 +212,8 @@ def main():
         real_circuits_analysis(device)
 
     swap_vs_bridge()
+    evaluation_episodes_analysis()
+    routing_time()
 
 
 if __name__ == '__main__':

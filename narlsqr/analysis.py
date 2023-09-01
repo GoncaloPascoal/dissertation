@@ -45,9 +45,10 @@ class MetricsAnalyzer:
             method: method_data.get(metric, [])
             for method, method_data in self.metrics.items()
             if metric in method_data
-        }).reindex(columns=MetricsAnalyzer.ROUTING_METHOD_NAMES)
+        })
 
         if rename_routing_methods:
+            df = df.reindex(columns=MetricsAnalyzer.ROUTING_METHOD_NAMES)
             df.rename(columns=MetricsAnalyzer.ROUTING_METHOD_NAMES, inplace=True)
 
         return df
