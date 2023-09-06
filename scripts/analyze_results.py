@@ -203,6 +203,42 @@ def routing_time():
         f.write(' & '.join(times_sabre))
 
 
+def enhancements_analysis():
+    prefix = ANALYSIS_DIR
+    os.makedirs(prefix, exist_ok=True)
+
+    metrics_analyzer = MetricsAnalyzer.unpickle(f'{RESULTS_DIR}/belem/random.pickle')
+
+    metrics = metrics_analyzer.metrics
+    metrics.pop('stochastic')
+    metrics.pop('basic')
+
+    variants = {
+        'no_bridge': 'No BRIDGE\nGate',
+        'no_embeddings': 'No\nEmbeddings',
+        'no_front_layer_swaps': 'No SWAP\nRestrictions',
+        'no_commutation': 'No\nCommutation\nAnalysis',
+        'no_enhancements': 'No\nEnhancements',
+    }
+
+    for variant in variants:
+        path = f'{RESULTS_DIR}/belem/enhancements/{variant}.pickle'
+        metrics[variant] = MetricsAnalyzer.unpickle(path).metrics['rl']
+
+    df = metrics_analyzer.metric_as_df('log_reliability')
+    df.rename(columns=dict(rl='Default', **variants, sabre='SABRE'), inplace=True)
+    df = df.reindex(df.mean().sort_values(ascending=False).index, axis=1)
+
+    palette = sns.color_palette('flare', n_colors=len(variants) + 1)
+    palette.append((0.26, 0.56, 0.86))
+
+    ax = sns.boxplot(df, palette=palette)
+    format_plot(ax, 'Routing Method', 'Log Reliability')
+    ax.get_figure().set_size_inches(20.0, 13.0)
+
+    save_current_plot(f'{prefix}/enhancements_analysis.pdf')
+
+
 def main():
     sns.set_theme(style='whitegrid')
     plt.rcParams['font.sans-serif'] = ['Nimbus Sans']
@@ -214,6 +250,7 @@ def main():
     swap_vs_bridge()
     evaluation_episodes_analysis()
     routing_time()
+    enhancements_analysis()
 
 
 if __name__ == '__main__':
