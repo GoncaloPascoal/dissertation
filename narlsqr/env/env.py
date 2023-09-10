@@ -126,12 +126,11 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         num_qubits = coupling_map.num_nodes()
         num_edges = coupling_map.num_edges()
 
-        if initial_mapping is None:
-            initial_mapping = np.arange(num_qubits)
         if circuit is None:
             circuit = QuantumCircuit(num_qubits)
-        if error_rates is None:
-            error_rates = np.zeros(num_edges)
+
+        initial_mapping = np.arange(num_qubits) if initial_mapping is None else np.array(initial_mapping, copy=False)
+        error_rates = np.zeros(num_edges) if error_rates is None else np.array(error_rates, copy=False)
 
         if initial_mapping.shape != (num_qubits,):
             raise ValueError('Initial mapping has invalid shape for the provided coupling map')
@@ -140,11 +139,11 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
 
         self.coupling_map = coupling_map
         self.circuit = circuit
-        self.initial_mapping = np.array(initial_mapping, copy=False)
+        self.initial_mapping = initial_mapping
         self.allow_bridge_gate = allow_bridge_gate
         self.commutation_analysis = commutation_analysis
         self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
-        self.error_rates = np.array(error_rates, copy=False)
+        self.error_rates = error_rates
         self.noise_aware = noise_aware
         self.noise_config = NoiseConfig() if noise_config is None else noise_config
         self.obs_modules = [] if obs_modules is None else obs_modules
