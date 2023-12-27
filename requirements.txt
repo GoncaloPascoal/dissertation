@@ -5,7 +5,7 @@ pytest>=7.4
 qiskit>=0.44
 qiskit-ibm-provider>=0.7
 ray[rllib]==2.6.*
-rich>=13.5
+rich>=13.7
 rustworkx>=0.13
 scipy>=1.11
 seaborn>=0.12

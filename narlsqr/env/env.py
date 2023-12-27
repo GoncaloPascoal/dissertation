@@ -18,6 +18,7 @@ from qiskit.circuit import Operation, Qubit
 from qiskit.circuit.library import CXGate, SwapGate
 from qiskit.converters import circuit_to_dag, dag_to_circuit
 from qiskit.dagcircuit import DAGOpNode
+from qiskit.transpiler import AnalysisPass, TranspilerError
 from qiskit.transpiler.passes import CommutationAnalysis
 
 from narlsqr.utils import dag_layers, indices_to_qubits, qubits_to_indices
@@ -70,6 +71,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         circuit must be assigned before the :py:meth:`reset` method is called.
     :param initial_mapping: Initial mapping from physical nodes to logical qubits. If ``None``, a random initial mapping
         will be used for each training iteration.
+    :param layout_pass: Analysis pass used to select the initial mapping during evaluation.
     :param allow_bridge_gate: Allow the use of BRIDGE gates when routing.
     :param commutation_analysis: Use commutation rules to schedule additional gates at each time step.
     :param error_rates: Array of two-qubit gate error rates.
@@ -113,6 +115,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         coupling_map: rx.PyGraph,
         circuit: Optional[QuantumCircuit] = None,
         initial_mapping: Optional[Iterable[float]] = None,
+        layout_pass: Optional[AnalysisPass] = None,
         allow_bridge_gate: bool = True,
         commutation_analysis: bool = True,
         restrict_swaps_to_front_layer: bool = True,
@@ -138,8 +141,8 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             raise ValueError('Error rates have invalid shape for the provided coupling map')
 
         self.coupling_map = coupling_map
-        self.circuit = circuit
         self.initial_mapping = initial_mapping
+        self.layout_pass = layout_pass
         self.allow_bridge_gate = allow_bridge_gate
         self.commutation_analysis = commutation_analysis
         self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
@@ -166,6 +169,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             self.bridge_pairs = []
 
         self.commutation_pass = CommutationAnalysis()
+        self.circuit = circuit
 
         # State information
         self.node_to_qubit = initial_mapping.copy()
@@ -206,6 +210,25 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
 
         # Custom metrics
         self.metrics = defaultdict(float)
+
+    @property
+    def circuit(self) -> QuantumCircuit:
+        return self._circuit
+
+    @circuit.setter
+    def circuit(self, value: QuantumCircuit):
+        self._circuit = value
+
+        if self.layout_pass is not None:
+            try:
+                self.layout_pass.run(circuit_to_dag(self.circuit))
+
+                layout = self.layout_pass.property_set['layout'].get_physical_bits()
+                qargs = tuple(layout[i] for i in range(self.num_qubits))
+                self.initial_mapping = np.array(qubits_to_indices(self.circuit, qargs))
+            except TranspilerError:
+                print('Exception occurred during layout pass, defaulting to trivial initial mapping')
+                self.initial_mapping = np.arange(self.num_qubits)
 
     @property
     def terminated(self) -> bool:
@@ -276,17 +299,27 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         # Swap actions
         if self.restrict_swaps_to_front_layer:
             front_layer_nodes = set()
+            front_layer_pairs = []
 
             for op_node in front_layer:
                 indices = qubits_to_indices(self.circuit, op_node.qargs)
-                nodes = (self.qubit_to_node[i] for i in indices)
-                front_layer_nodes.update(nodes)
+                nodes = tuple(self.qubit_to_node[i] for i in indices)
 
-            invalid_swap_actions = [
-                i for i, edge in enumerate(self.edge_list)
-                if not front_layer_nodes.intersection(edge)
-            ]
-            mask[invalid_swap_actions] = 0
+                front_layer_nodes.update(nodes)
+                front_layer_pairs.append(nodes)
+
+            sum_distances_before = sum(self.distance_matrix[node_a][node_b] for node_a, node_b in front_layer_pairs)
+
+            for i, edge in enumerate(self.edge_list):
+                if front_layer_nodes.intersection(edge):
+                    replacement_map = dict(zip(edge, edge[::-1]))
+                    sum_distances_after = sum(
+                        self.distance_matrix[replacement_map.get(node_a, node_a)][replacement_map.get(node_b, node_b)]
+                        for node_a, node_b in front_layer_pairs
+                    )
+                    mask[i] = sum_distances_after <= sum_distances_before
+                else:
+                    mask[i] = 0
 
         # Disallow redundant consecutive SWAPs
         if self._blocked_swap is not None:
