@@ -51,7 +51,7 @@ def log_metric(
     mean = [f'{x:{float_format}}' for x in mean]
     std = [f'{x:{float_format}}' for x in df.std()]
 
-    with open(f'{prefix}/{metric}.txt', 'w') as f:
+    with open(f'{prefix}/{metric}.txt', mode='w', encoding='utf8') as f:
         f.write(f'Algorithm: {" & ".join(algorithms)}\n')
         f.write(f'Mean: {" & ".join(mean)}\n')
         f.write(f'Std: {" & ".join(std)}\n')
@@ -211,7 +211,7 @@ def routing_time():
         times_rl.append(f'{df["rl"].mean():.3f}')
         times_sabre.append(f'{df["sabre"].mean():.5f}')
 
-    with open(f'{ANALYSIS_DIR}/routing_time.txt', 'w') as f:
+    with open(f'{ANALYSIS_DIR}/routing_time.txt', mode='w', encoding='utf8') as f:
         f.write(' & '.join(times_rl))
         f.write('\n')
         f.write(' & '.join(times_sabre))

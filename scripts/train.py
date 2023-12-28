@@ -21,7 +21,7 @@ def main():
 
     parser.add_argument(
         '-m', '--model-dir', metavar='P',
-        help='directory to save or load the model (can be a path to a checkpoint or the root folder, in which case'
+        help='directory to save or load the model (can be a path to a checkpoint or the root folder, in which case '
              'the latest checkpoint will be loaded)',
         required=True,
     )
