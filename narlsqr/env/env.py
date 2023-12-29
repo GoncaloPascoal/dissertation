@@ -74,6 +74,9 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
     :param layout_pass: Analysis pass used to select the initial mapping during evaluation.
     :param allow_bridge_gate: Allow the use of BRIDGE gates when routing.
     :param commutation_analysis: Use commutation rules to schedule additional gates at each time step.
+    :param restrict_swaps_to_front_layer: Only allow SWAP operations that involve qubits from the first layer of gates.
+    :param force_swap_distance_reduction: Only allow SWAP operations that reduce the total distance between interacting
+        qubits in the first layer of gates. Only active if :py:attr:`restrict_swaps_to_front_layer` is also True.
     :param error_rates: Array of two-qubit gate error rates.
     :param noise_aware: Whether the environment should be noise-aware.
     :param noise_config: Configuration for rewards calculated from log reliabilities.
@@ -119,6 +122,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         allow_bridge_gate: bool = True,
         commutation_analysis: bool = True,
         restrict_swaps_to_front_layer: bool = True,
+        force_swap_distance_reduction: bool = True,
         error_rates: Optional[Iterable[float]] = None,
         noise_aware: bool = True,
         noise_config: Optional[NoiseConfig] = None,
@@ -146,6 +150,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         self.allow_bridge_gate = allow_bridge_gate
         self.commutation_analysis = commutation_analysis
         self.restrict_swaps_to_front_layer = restrict_swaps_to_front_layer
+        self.force_swap_distance_reduction = force_swap_distance_reduction
         self.error_rates = error_rates
         self.noise_aware = noise_aware
         self.noise_config = NoiseConfig() if noise_config is None else noise_config
@@ -312,12 +317,13 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
 
             for i, edge in enumerate(self.edge_list):
                 if front_layer_nodes.intersection(edge):
-                    replacement_map = dict(zip(edge, edge[::-1]))
-                    sum_distances_after = sum(
-                        self.distance_matrix[replacement_map.get(node_a, node_a)][replacement_map.get(node_b, node_b)]
-                        for node_a, node_b in front_layer_pairs
-                    )
-                    mask[i] = sum_distances_after <= sum_distances_before
+                    if self.force_swap_distance_reduction:
+                        after_map = dict(zip(edge, edge[::-1]))
+                        sum_distances_after = sum(
+                            self.distance_matrix[after_map.get(node_a, node_a)][after_map.get(node_b, node_b)]
+                            for node_a, node_b in front_layer_pairs
+                        )
+                        mask[i] = sum_distances_after <= sum_distances_before
                 else:
                     mask[i] = 0
 
