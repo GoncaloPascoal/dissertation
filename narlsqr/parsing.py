@@ -6,6 +6,7 @@ from typing import Any, Final, Optional
 import rustworkx as rx
 import yaml
 from qiskit.providers.models import BackendProperties
+from qiskit.transpiler import CouplingMap
 from ray.rllib import Policy
 from ray.rllib.policy.sample_batch import DEFAULT_POLICY_ID
 
@@ -46,8 +47,22 @@ NOISE_GENERATORS: Final[dict[str, Callable[..., NoiseGenerator]]] = {
 
 
 def parse_yaml(path: str) -> dict[str, Any]:
-    with open(path, 'r') as f:
+    with open(path, encoding='utf8') as f:
         return yaml.safe_load(f)
+
+def parse_coupling_map(coupling_map_config: dict[str, Any] | str | list) -> CouplingMap:
+    if isinstance(coupling_map_config, dict):
+        return COUPLING_MAPS[coupling_map_config['type']](**coupling_map_config.get('args', {}))
+
+    if isinstance(coupling_map_config, str):
+        return COUPLING_MAPS[coupling_map_config]()
+
+    if isinstance(coupling_map_config, list):
+        coupling_map = rx.PyGraph()
+        coupling_map.extend_from_edge_list(coupling_map_config)
+        return coupling_map
+
+    raise ValueError(f'Coupling map configuration has invalid type `{type(coupling_map_config)}`')
 
 def parse_env_config(path: str) -> Callable[[], RoutingEnv]:
     config = parse_yaml(path)
@@ -161,7 +176,7 @@ def parse_eval_config(
     policy = Policy.from_checkpoint(checkpoint_dir)[DEFAULT_POLICY_ID]
 
     calibration_data = config.pop('calibration_data')
-    with open(calibration_data, 'r') as f:
+    with open(calibration_data, encoding='utf8') as f:
         data = json.load(f)
     backend_properties = BackendProperties.from_dict(data)
 
