@@ -9,3 +9,4 @@ obs_modules:
       depth: 8
 
 noise_aware: false
+force_swap_distance_reduction: true

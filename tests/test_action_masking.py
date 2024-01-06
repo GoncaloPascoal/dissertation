@@ -7,11 +7,6 @@ from narlsqr.env import RoutingEnv
 from narlsqr.topology import linear_topology
 
 
-@pytest.fixture
-def env_linear_4q() -> RoutingEnv:
-    return RoutingEnv(linear_topology(4))
-
-
 @pytest.fixture()
 def env_linear_5q() -> RoutingEnv:
     return RoutingEnv(linear_topology(5))
@@ -34,16 +29,25 @@ def test_bridge(env_linear_5q: RoutingEnv):
     np.testing.assert_array_equal(obs['action_mask'], np.array([1, 1, 1, 1, 0, 1, 1]))
 
 
-def test_blocked_swap(env_linear_4q: RoutingEnv):
-    env = env_linear_4q
+def test_blocked_swap(env_linear_5q: RoutingEnv):
+    env = env_linear_5q
 
-    qc = QuantumCircuit(4)
-    qc.cx(0, 3)
+    qc = QuantumCircuit(5)
+    qc.cx(0, 4)
 
     env.circuit = qc
 
     env.reset()
     obs, *_ = env.step(0)
 
-    assert env._blocked_swap == 0
-    np.testing.assert_array_equal(obs['action_mask'], np.array([0, 1, 1, 0, 1]))
+    assert env._blocked_swaps == {0}
+    np.testing.assert_array_equal(obs['action_mask'], np.array([0, 1, 0, 1, 0, 0, 0]))
+
+    obs, *_ = env.step(1)
+
+    assert env._blocked_swaps == {1}
+    np.testing.assert_array_equal(obs['action_mask'], np.array([0, 0, 1, 1, 0, 0, 1]))
+
+    env.step(6)
+
+    assert env._blocked_swaps == set()

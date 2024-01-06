@@ -8,6 +8,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.axes import Axes
 from matplotlib.ticker import MaxNLocator
+from rich import print
 
 from narlsqr.analysis import MetricsAnalyzer
 
@@ -258,12 +259,17 @@ def main():
     plt.rcParams['font.sans-serif'] = ['Nimbus Sans']
 
     for device in DEVICES:
+        print(f'Performing analysis for [b cyan]{device}[/b cyan]')
         random_circuits_analysis(device)
         real_circuits_analysis(device)
 
+    print('\nPerforming [b cyan]SWAP vs. BRIDGE[/b cyan] analysis')
     swap_vs_bridge()
+    print('Performing [b cyan]evaluation episodes[/b cyan] analysis')
     evaluation_episodes_analysis()
+    print('Performing [b cyan]routing time[/b cyan] analysis')
     routing_time()
+    print('Performing [b cyan]enhancements[/b cyan] analysis')
     enhancements_analysis()
 
 

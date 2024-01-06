@@ -6,7 +6,7 @@ from narlsqr.env import RoutingEnv
 from narlsqr.topology import linear_topology
 
 @pytest.fixture
-def env_linear_4q() -> RoutingEnv:
+def env_linear_5q() -> RoutingEnv:
     return RoutingEnv(linear_topology(4), commutation_analysis=True)
 
 
@@ -17,8 +17,8 @@ def assert_commutation(env: RoutingEnv, circuit: QuantumCircuit, expected: Quant
     assert routed_circuit == expected, f'\nActual: {routed_circuit}\n\nExpected: {expected}'
 
 
-def test_basic(env_linear_4q: RoutingEnv):
-    env = env_linear_4q
+def test_basic(env_linear_5q):
+    env = env_linear_5q
 
     # CNOTs with the same control qubit commute
     qc = QuantumCircuit(4)
@@ -59,8 +59,8 @@ def test_basic(env_linear_4q: RoutingEnv):
     assert_commutation(env, qc, expected)
 
 
-def test_commutation_order(env_linear_4q: RoutingEnv):
-    env = env_linear_4q
+def test_commutation_order(env_linear_5q):
+    env = env_linear_5q
 
     # Gates that commute with an infeasible gate but do not commute amongst themselves should be scheduled
     # in the same order they appear in the DAG
@@ -76,8 +76,8 @@ def test_commutation_order(env_linear_4q: RoutingEnv):
     assert_commutation(env, qc, expected)
 
 
-def test_1q_blocking(env_linear_4q: RoutingEnv):
-    env = env_linear_4q
+def test_1q_blocking(env_linear_5q):
+    env = env_linear_5q
 
     # Non-commuting single-qubit gates can block other commuting gates
     qc = QuantumCircuit(4)
@@ -91,8 +91,8 @@ def test_1q_blocking(env_linear_4q: RoutingEnv):
     assert_commutation(env, qc, expected)
 
 
-def test_2q_blocking(env_linear_4q: RoutingEnv):
-    env = env_linear_4q
+def test_2q_blocking(env_linear_5q):
+    env = env_linear_5q
 
     # Non-commuting two-qubit gates can block other commuting gates
     qc = QuantumCircuit(4)
@@ -106,8 +106,8 @@ def test_2q_blocking(env_linear_4q: RoutingEnv):
     assert_commutation(env, qc, expected)
 
 
-def test_trivially_commuting(env_linear_4q: RoutingEnv):
-    env = env_linear_4q
+def test_trivially_commuting(env_linear_5q):
+    env = env_linear_5q
 
     # Gates in the same layer that do not share qubits commute trivially
     qc = QuantumCircuit(4)
@@ -120,4 +120,3 @@ def test_trivially_commuting(env_linear_4q: RoutingEnv):
     expected.cx(1, 2)
 
     assert_commutation(env, qc, expected)
-

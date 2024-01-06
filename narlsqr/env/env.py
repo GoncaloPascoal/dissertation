@@ -1,5 +1,6 @@
 
 import copy
+import itertools
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
 from collections.abc import Iterable
@@ -102,6 +103,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
     initial_mapping: NDArray
     error_rates: NDArray
     obs_modules: list['ObsModule']
+    edge_list: list[tuple[int, int]]
 
     routed_gates: list[tuple[Operation, tuple[int, ...]]]
     routed_op_nodes: set[DAGOpNode]
@@ -113,6 +115,9 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
 
     pair_to_bridge_args: dict[tuple[int, int], BridgeArgs]
 
+    _scheduled_2q_gates: list[tuple[int, int]]
+    _blocked_swaps: set[int]
+
     def __init__(
         self,
         coupling_map: rx.PyGraph,
@@ -122,7 +127,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         allow_bridge_gate: bool = True,
         commutation_analysis: bool = True,
         restrict_swaps_to_front_layer: bool = True,
-        force_swap_distance_reduction: bool = True,
+        force_swap_distance_reduction: bool = False,
         error_rates: Optional[Iterable[float]] = None,
         noise_aware: bool = True,
         noise_config: Optional[NoiseConfig] = None,
@@ -202,10 +207,10 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
 
         self.pair_to_bridge_args = {}
 
-        self._num_scheduled_2q_gates = 0
+        self._scheduled_2q_gates = []
         self._scheduling_reward = 0.0
 
-        self._blocked_swap = None
+        self._blocked_swaps = set()
 
         # Action / observation space
         num_actions = self.num_edges + len(self.bridge_pairs)
@@ -260,6 +265,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         for node, qubit in enumerate(self.node_to_qubit):
             self.qubit_to_node[qubit] = node
 
+        self._blocked_swaps.clear()
         self._schedule_gates()
 
         return self.current_obs(), {}
@@ -269,13 +275,14 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             # Environment terminated immediately and does not require routing
             return self.current_obs(), 0.0, True, False, {}
 
-        action_is_swap = action < self.num_edges
-
-        if action_is_swap:
+        if action < self.num_edges:
             # SWAP action
             edge = self.edge_list[action]
             self._swap(edge)
             reward = self._swap_reward(edge)
+
+            self._remove_blocked_swaps(set(edge))
+            self._blocked_swaps.add(action)
         else:
             # BRIDGE action
             pair = self.bridge_pairs[action - self.num_edges]
@@ -287,13 +294,15 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
                 self._remove_op_node(op_node)
                 self._bridge(*nodes)
                 reward = self._bridge_reward(*nodes)
+
+                self._remove_blocked_swaps({nodes[0], nodes[2]})
             else:
                 print('Invalid BRIDGE action was selected')
                 reward = 0.0
 
         self._schedule_gates()
         reward += self._scheduling_reward
-        self._blocked_swap = action if action_is_swap and self._num_scheduled_2q_gates == 0 else None
+        self._remove_blocked_swaps(set(itertools.chain(*self._scheduled_2q_gates)))
 
         return self.current_obs(), reward, self.terminated, False, {}
 
@@ -328,8 +337,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
                     mask[i] = 0
 
         # Disallow redundant consecutive SWAPs
-        if self._blocked_swap is not None:
-            mask[self._blocked_swap] = 0
+        mask[list(self._blocked_swaps)] = 0
 
         if self.allow_bridge_gate:
             # Compute bridge args
@@ -413,6 +421,10 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
             'true_obs': spaces.Dict({module.key(): module.space(self) for module in self.obs_modules}),
         }
 
+    def _remove_blocked_swaps(self, qubits: set[int]):
+        to_remove = {i for i in self._blocked_swaps if qubits.intersection(self.edge_list[i])}
+        self._blocked_swaps.difference_update(to_remove)
+
     def _remove_op_node(self, op_node: DAGOpNode):
         self.dag.remove_op_node(op_node)
         self.routed_op_nodes.add(op_node)
@@ -422,7 +434,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         self._remove_op_node(op_node)
 
         if len(nodes) == 2:
-            self._num_scheduled_2q_gates += 1
+            self._scheduled_2q_gates.append(nodes)  # type: ignore
             self._scheduling_reward += self._gate_reward(nodes)  # type: ignore
 
             if self.log_metrics:
@@ -434,7 +446,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         return OrderedSet(commutation_info[qubit][idx])
 
     def _schedule_gates(self, only_front_layer: bool = False):
-        self._num_scheduled_2q_gates = 0
+        self._scheduled_2q_gates = []
         self._scheduling_reward = 0.0
 
         op_nodes = self.dag.front_layer() if only_front_layer else self.dag.op_nodes()

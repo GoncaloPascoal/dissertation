@@ -7,3 +7,5 @@ obs_modules:
   - type: 'circuit_matrix'
     args:
       depth: 8
+
+force_swap_distance_reduction: true
