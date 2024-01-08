@@ -46,8 +46,22 @@ NOISE_GENERATORS: Final[dict[str, Callable[..., NoiseGenerator]]] = {
 
 
 def parse_yaml(path: str) -> dict[str, Any]:
-    with open(path, 'r') as f:
+    with open(path, encoding='utf8') as f:
         return yaml.safe_load(f)
+
+def parse_coupling_map(coupling_map_config: dict[str, Any] | str | list) -> rx.PyGraph:
+    if isinstance(coupling_map_config, dict):
+        return COUPLING_MAPS[coupling_map_config['type']](**coupling_map_config.get('args', {}))
+
+    if isinstance(coupling_map_config, str):
+        return COUPLING_MAPS[coupling_map_config]()
+
+    if isinstance(coupling_map_config, list):
+        coupling_map = rx.PyGraph()
+        coupling_map.extend_from_edge_list(coupling_map_config)
+        return coupling_map
+
+    raise ValueError(f'Coupling map configuration has invalid type `{type(coupling_map_config)}`')
 
 def parse_env_config(path: str) -> Callable[[], RoutingEnv]:
     config = parse_yaml(path)
@@ -136,14 +150,19 @@ def parse_train_config(
         # Retain only environment or training-related args
         args = {
             k: v for k, v in args.items() if k in {
-                'env_creator', 'circuit_generator', 'noise_generator', 'recalibration_interval', 'episodes_per_circuit',
-                'checkpoint_config',
+                'env_creator', 'circuit_generator', 'noise_generator', 'recalibration_interval',
+                'episodes_per_circuit', 'checkpoint_config',
             }
         }
 
         orchestrator = TrainingOrchestrator.from_checkpoint(checkpoint_dir, **args)
 
     return orchestrator
+
+def parse_calibration_data(path: str) -> BackendProperties:
+    with open(path, encoding='utf8') as f:
+        data = json.load(f)
+    return BackendProperties.from_dict(data)
 
 def parse_eval_config(
     env_config_path: str,
@@ -160,11 +179,7 @@ def parse_eval_config(
 
     policy = Policy.from_checkpoint(checkpoint_dir)[DEFAULT_POLICY_ID]
 
-    calibration_data = config.pop('calibration_data')
-    with open(calibration_data, 'r') as f:
-        data = json.load(f)
-    backend_properties = BackendProperties.from_dict(data)
-
+    backend_properties = parse_calibration_data(config.pop('calibration_data'))
     circuit_generator = parse_circuit_generator(config.pop('circuit_generator'), env)
 
     args = dict(

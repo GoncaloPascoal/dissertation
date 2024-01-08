@@ -8,6 +8,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.axes import Axes
 from matplotlib.ticker import MaxNLocator
+from rich import print
 
 from narlsqr.analysis import MetricsAnalyzer
 
@@ -27,6 +28,36 @@ def save_current_plot(path: str):
     plt.savefig(path, bbox_inches='tight', pad_inches=0.2)
     plt.close()
 
+def log_metric(
+    metrics_analyzer: MetricsAnalyzer,
+    prefix: str,
+    metric: str,
+    *,
+    default_format: str = '.2f',
+    reliability_format: str = '.3f',
+):
+    df = metrics_analyzer.metric_as_df(metric)
+
+    algorithms = [x for x in df.columns]
+
+    metric_is_reliability = metric.endswith('reliability')
+    float_format = reliability_format if metric_is_reliability else default_format
+
+    mean = df.mean()
+    qiskit_mean = mean.iloc[1:4]
+    best = qiskit_mean.max() if metric_is_reliability else qiskit_mean.min()
+
+    improvement = (mean.iloc[0] - best) / abs(best)
+
+    mean = [f'{x:{float_format}}' for x in mean]
+    std = [f'{x:{float_format}}' for x in df.std()]
+
+    with open(f'{prefix}/{metric}.txt', mode='w', encoding='utf8') as f:
+        f.write(f'Algorithm: {" & ".join(algorithms)}\n')
+        f.write(f'Mean: {" & ".join(mean)}\n')
+        f.write(f'Std: {" & ".join(std)}\n')
+        f.write(f'Change (rel. best Qiskit algorithm): {improvement:.1%}\n')
+
 
 def random_circuits_analysis(device: str):
     prefix = f'{ANALYSIS_DIR}/{device}/random'
@@ -37,15 +68,7 @@ def random_circuits_analysis(device: str):
     metrics_analyzer.metrics['rl_noise_unaware'] = noise_unaware.metrics['rl']
 
     for metric in ['added_cnot_count', 'depth', 'log_reliability', 'reliability']:
-        df = metrics_analyzer.metric_as_df(metric)
-
-        float_format = '.3f' if metric in {'log_reliability', 'reliability'} else '.2f'
-        mean = [f'{x:{float_format}}' for x in df.mean()]
-        std = [f'{x:{float_format}}' for x in df.std()]
-
-        with open(f'{prefix}/{metric}.txt', 'w') as f:
-            f.write(f'Mean: {" & ".join(mean)}\n')
-            f.write(f'Std: {" & ".join(std)}\n')
+        log_metric(metrics_analyzer, prefix, metric)
 
     ax = metrics_analyzer.box_plot('added_cnot_count')
     format_plot(ax, 'Routing Algorithm', 'Additional CNOT Gates')
@@ -68,15 +91,7 @@ def real_circuits_analysis(device: str):
     metrics_analyzer.metrics['rl_noise_unaware'] = noise_unaware.metrics['rl']
 
     for metric in ['normalized_added_cnot_count', 'normalized_depth', 'normalized_log_reliability']:
-        df = metrics_analyzer.metric_as_df(metric)
-
-        float_format = '.4f' if metric == 'normalized_log_reliability' else '.3f'
-        mean = [f'{x:{float_format}}' for x in df.mean()]
-        std = [f'{x:{float_format}}' for x in df.std()]
-
-        with open(f'{prefix}/{metric.removeprefix("normalized_")}.txt', 'w') as f:
-            f.write(f'Mean: {" & ".join(mean)}\n')
-            f.write(f'Std: {" & ".join(std)}\n')
+        log_metric(metrics_analyzer, prefix, metric, default_format='.3f', reliability_format='.4f')
 
     ax = metrics_analyzer.box_plot('normalized_added_cnot_count')
     ax.tick_params(labelsize=16)
@@ -197,7 +212,7 @@ def routing_time():
         times_rl.append(f'{df["rl"].mean():.3f}')
         times_sabre.append(f'{df["sabre"].mean():.5f}')
 
-    with open(f'{ANALYSIS_DIR}/routing_time.txt', 'w') as f:
+    with open(f'{ANALYSIS_DIR}/routing_time.txt', mode='w', encoding='utf8') as f:
         f.write(' & '.join(times_rl))
         f.write('\n')
         f.write(' & '.join(times_sabre))
@@ -244,12 +259,17 @@ def main():
     plt.rcParams['font.sans-serif'] = ['Nimbus Sans']
 
     for device in DEVICES:
+        print(f'Performing analysis for [b cyan]{device}[/b cyan]')
         random_circuits_analysis(device)
         real_circuits_analysis(device)
 
+    print('\nPerforming [b cyan]SWAP vs. BRIDGE[/b cyan] analysis')
     swap_vs_bridge()
+    print('Performing [b cyan]evaluation episodes[/b cyan] analysis')
     evaluation_episodes_analysis()
+    print('Performing [b cyan]routing time[/b cyan] analysis')
     routing_time()
+    print('Performing [b cyan]enhancements[/b cyan] analysis')
     enhancements_analysis()
 
 

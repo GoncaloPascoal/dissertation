@@ -6,7 +6,6 @@ import time
 from collections.abc import Collection, Set
 from dataclasses import dataclass, field
 from datetime import datetime
-from math import inf
 from numbers import Real
 from pathlib import Path
 from typing import Final, Optional, Self, cast
@@ -14,6 +13,7 @@ from typing import Final, Optional, Self, cast
 import numpy as np
 from qiskit import QuantumCircuit, transpile
 from qiskit.providers.models import BackendProperties
+from qiskit.transpiler import CouplingMap
 from ray.rllib import Policy
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
 from ray.rllib.env import EnvContext
@@ -29,7 +29,7 @@ from narlsqr.generators.circuit import CircuitGenerator, DatasetCircuitGenerator
 from narlsqr.generators.noise import NoiseGenerator
 from narlsqr.rllib.action_mask_model import ActionMaskModel
 from narlsqr.rllib.callbacks import RoutingCallbacks
-from narlsqr.utils import Factory, circuit_reliability, seed_default_generators
+from narlsqr.utils import Factory, circuit_reliability, seed_default_generators, IBM_BASIS_GATES
 
 ROUTING_ENV_NAME: Final[str] = 'RoutingEnv'
 
@@ -267,6 +267,7 @@ class EvaluationOrchestrator:
         stochastic: bool = True,
         num_circuits: Optional[int] = None,
         routing_methods: str | Collection[str] = 'sabre',
+        optimization_level: int = 0,
         use_tqdm: bool = False,
         seed: Optional[int] = None,
     ):
@@ -285,6 +286,9 @@ class EvaluationOrchestrator:
         if evaluation_episodes <= 0:
             raise ValueError(f'Evaluation episodes must be positive, got {evaluation_episodes}')
 
+        if not (0 <= optimization_level <= 3):
+            raise ValueError(f'Optimization level must be between 0 and 3, got {optimization_level}')
+
         if seed is not None:
             seed_default_generators(seed)
             circuit_generator.seed(seed)
@@ -300,10 +304,14 @@ class EvaluationOrchestrator:
         self.stochastic = stochastic
         self.num_circuits = num_circuits
         self.routing_methods = [routing_methods] if isinstance(routing_methods, str) else list(routing_methods)
+        self.optimization_level = optimization_level
         self.use_tqdm = use_tqdm
         self.seed = seed
 
         self.env = self.eval_env.env
+        self.routing_env = self.eval_env.unwrapped
+
+        self.qiskit_coupling_map = CouplingMap(self.routing_env.coupling_map.to_directed().edge_list())  # type: ignore
 
         self.metrics_analyzer = MetricsAnalyzer()
 
@@ -325,17 +333,22 @@ class EvaluationOrchestrator:
         for gate in ['swap', 'bridge']:
             log_metric_checked(f'{gate}_count', routed_ops.get(gate, 0))
 
-        routed_circuit = routed_circuit.decompose(['swap', 'bridge'])
+        routed_circuit = transpile(
+            routed_circuit,
+            basis_gates=IBM_BASIS_GATES,
+            optimization_level=self.optimization_level,
+            seed_transpiler=self.seed,
+        )
 
-        original_cnot_count = original_circuit.count_ops().get('cx', 0)
-        cnot_count = routed_circuit.count_ops().get('cx', 0)
+        original_cnot_count = original_circuit.count_ops().get('cx', 0)  # type: ignore
+        cnot_count = routed_circuit.count_ops().get('cx', 0)  # type: ignore
         added_cnot_count = cnot_count - original_cnot_count
 
         original_depth = original_circuit.depth()
         depth = routed_circuit.depth()
 
-        reliability = circuit_reliability(routed_circuit, self.env.edge_to_reliability)
-        log_reliability = np.emath.logn(self.env.noise_config.log_base, reliability)
+        reliability = circuit_reliability(routed_circuit, self.routing_env.edge_to_reliability)
+        log_reliability = np.emath.logn(self.routing_env.noise_config.log_base, reliability)
 
         log_metric_checked('original_cnot_count', original_cnot_count)
         log_metric_checked('cnot_count', cnot_count)
@@ -360,40 +373,30 @@ class EvaluationOrchestrator:
         for _ in range(self.num_circuits):
             start_time = time.perf_counter()
 
-            best_reward = -inf
-            routed_circuit = self.env.circuit.copy_empty_like()
             initial_layout = None
-
             for _ in range(self.eval_env.evaluation_iters):
                 obs, _ = self.eval_env.reset()
                 if initial_layout is None:
-                    initial_layout = self.env.qubit_to_node.tolist()
+                    initial_layout = self.routing_env.qubit_to_node.tolist()
 
                 terminated = False
-                total_reward = 0.0
-
                 while not terminated:
                     action, *_ = self.policy.compute_single_action(obs, explore=self.stochastic)
-                    obs, reward, terminated, *_ = self.eval_env.step(action)
-                    total_reward += reward
+                    obs, _, terminated, *_ = self.eval_env.step(action)
 
-                if total_reward > best_reward:
-                    best_reward = total_reward
-                    routed_circuit = self.env.routed_circuit()
-                
                 if self.use_tqdm:
                     progress.update()
 
             self.metrics_analyzer.log_metric('rl', 'routing_time', time.perf_counter() - start_time)
 
-            original_circuit = self.env.circuit
-            self.log_circuit_metrics('rl', original_circuit, routed_circuit)
+            original_circuit = self.routing_env.circuit
+            self.log_circuit_metrics('rl', original_circuit, self.env.best_circuit)
 
             for method in self.routing_methods:
                 start_time = time.perf_counter()
                 routed_circuit = transpile(
                     original_circuit,
-                    coupling_map=self.eval_env.qiskit_coupling_map,
+                    coupling_map=self.qiskit_coupling_map,
                     initial_layout=initial_layout,
                     routing_method=method,
                     optimization_level=0,
