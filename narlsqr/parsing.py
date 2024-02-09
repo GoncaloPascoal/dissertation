@@ -87,7 +87,7 @@ def parse_env_config(path: str) -> Callable[[], RoutingEnv]:
         if isinstance(om_config, str):
             obs_modules.append(OBS_MODULES[om_config]())
         elif isinstance(om_config, dict):
-            obs_modules.append(OBS_MODULES[om_config['type']](**om_config['args']))  # type: ignore
+            obs_modules.append(OBS_MODULES[om_config['type']](**om_config.get('args', {})))  # type: ignore
         else:
             raise ValueError(f'Observation module configuration has invalid type `{type(om_config)}`')
 

@@ -105,6 +105,9 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
     obs_modules: list['ObsModule']
     edge_list: list[tuple[int, int]]
 
+    node_to_qubit: NDArray
+    qubit_to_node: NDArray
+
     routed_gates: list[tuple[Operation, tuple[int, ...]]]
     routed_op_nodes: set[DAGOpNode]
 
@@ -122,7 +125,7 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
         self,
         coupling_map: rx.PyGraph,
         circuit: Optional[QuantumCircuit] = None,
-        initial_mapping: Optional[Iterable[float]] = None,
+        initial_mapping: Optional[Iterable[int]] = None,
         layout_pass: Optional[AnalysisPass] = None,
         allow_bridge_gate: bool = True,
         commutation_analysis: bool = True,
@@ -336,9 +339,6 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
                 else:
                     mask[i] = 0
 
-        # Disallow redundant consecutive SWAPs
-        mask[list(self._blocked_swaps)] = 0
-
         if self.allow_bridge_gate:
             # Compute bridge args
             pair_to_bridge_args = {}
@@ -363,6 +363,13 @@ class RoutingEnv(gym.Env[RoutingObs, int], ABC):
                 if pair not in self.pair_to_bridge_args
             ]
             mask[invalid_bridge_actions] = 0
+
+        # Disallow redundant consecutive SWAPs, as long as there is still a
+        # valid action
+        new_mask = mask.copy()
+        new_mask[list(self._blocked_swaps)] = 0
+        if new_mask.any():
+            mask = new_mask
 
         return mask
 
@@ -597,7 +604,7 @@ class CircuitMatrix(ObsModule):
 
     def obs(self, env: RoutingEnv) -> NDArray:
         space = self.space(env)
-        circuit = np.full(space.shape, 0, dtype=space.dtype)
+        circuit = np.zeros(space.shape, dtype=space.dtype)
 
         layer_idx = 0
         layer_qubits = set()

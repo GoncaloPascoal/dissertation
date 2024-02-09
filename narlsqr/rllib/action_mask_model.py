@@ -46,7 +46,7 @@ class ActionMaskModel(TorchModelV2, nn.Module):
         embedding_dim = kwargs.get('embedding_dim')
         if 'circuit_matrix' in true_obs_space.spaces and embedding_dim is not None:
             circuit_matrix = cast(spaces.Box, true_obs_space['circuit_matrix'])
-            self.embedding = nn.Embedding(circuit_matrix.shape[0] + 1, embedding_dim)
+            self.embedding = nn.Embedding(circuit_matrix.high.flat[0] + 1, embedding_dim)
         else:
             self.embedding = None
 

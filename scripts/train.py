@@ -32,7 +32,8 @@ def main():
                         help='number of rollout workers')
     parser.add_argument('-e', '--envs-per-worker', metavar='N', type=int, default=argparse.SUPPRESS,
                         help='number of environments per rollout worker')
-    parser.add_argument('-s', '--seed', type=int, default=argparse.SUPPRESS, help='seed for random number generators')
+    parser.add_argument('-s', '--seed', metavar='N', type=int, default=argparse.SUPPRESS,
+                        help='seed for random number generators')
 
     args = vars(parser.parse_args())
 
