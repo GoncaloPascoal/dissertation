@@ -4,7 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Optional, TypeAlias
 
-from qiskit import QuantumCircuit, transpile
+from qiskit import QuantumCircuit, qasm2, transpile
 from qiskit.circuit.library import MCXGate, SXGate, SXdgGate, SwapGate, XGate
 from tqdm.rich import tqdm
 
@@ -113,4 +113,5 @@ def batch_convert_real_to_qasm(
             if basis_gates is not None:
                 qc = transpile(qc, basis_gates=basis_gates, optimization_level=0)
 
-            qc.qasm(filename=os.path.join(dst_dir, f'{file_name}.qasm'))
+            qasm_file_path = Path(os.path.join(dst_dir, f'{file_name}.qasm'))
+            qasm2.dump(qc, qasm_file_path)

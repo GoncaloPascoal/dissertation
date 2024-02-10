@@ -39,12 +39,6 @@ class CheckpointConfig:
     model_dir: str
     interval: int = field(default=25, kw_only=True)
 
-def is_checkpoint(path: str | Path) -> bool:
-    if isinstance(path, str):
-        path = Path(path)
-
-    return path.is_dir() and path.name.startswith('checkpoint')
-
 def get_checkpoint_iters(checkpoint_dir: str | Path) -> int:
     if isinstance(checkpoint_dir, str):
         checkpoint_dir = Path(checkpoint_dir)
@@ -140,7 +134,6 @@ class TrainingOrchestrator:
                 kl_coeff=0.0,
                 clip_param=0.2,
                 grad_clip=0.5,
-                _enable_learner_api=False,
             )
             .callbacks(RoutingCallbacks)
             .debugging(
@@ -156,6 +149,7 @@ class TrainingOrchestrator:
                 evaluation_interval=evaluation_interval,
                 evaluation_duration=evaluation_duration,
             )
+            .experimental(_enable_new_api_stack=False)
             .fault_tolerance(
                 recreate_failed_workers=True,
                 restart_failed_sub_environments=True,
@@ -168,7 +162,6 @@ class TrainingOrchestrator:
                 num_gpus=num_gpus,
                 num_cpus_for_local_worker=0 if num_gpus > 0.0 else None,
             )
-            .rl_module(_enable_rl_module_api=False)
             .rollouts(
                 num_rollout_workers=num_workers,
                 num_envs_per_worker=envs_per_worker,
@@ -216,7 +209,7 @@ class TrainingOrchestrator:
     @classmethod
     def from_checkpoint(
         cls,
-        checkpoint_dir: str,
+        model_dir: str,
         env_creator: Factory[RoutingEnv],
         circuit_generator: CircuitGenerator,
         noise_generator: NoiseGenerator,
@@ -233,10 +226,12 @@ class TrainingOrchestrator:
             episodes_per_circuit=episodes_per_circuit,
         )
 
+        # TODO: Logger creator does not persist after loading model
+
         obj = cls.__new__(cls)
         super(TrainingOrchestrator, obj).__init__()
-        obj.algorithm = PPO.from_checkpoint(checkpoint_dir)
-        obj.total_iters = get_checkpoint_iters(checkpoint_dir)
+        obj.algorithm = PPO.from_checkpoint(model_dir)
+        obj.total_iters = obj.algorithm.iteration
         obj.checkpoint_config = checkpoint_config
 
         return obj
@@ -247,10 +242,10 @@ class TrainingOrchestrator:
             self.total_iters += 1
 
             if self.checkpoint_config is not None and self.total_iters % self.checkpoint_config.interval == 0:
-                self.algorithm.save(self.checkpoint_config.model_dir)
+                self.save(self.checkpoint_config.model_dir)
 
-    def save(self, model_dir: str) -> str:
-        return self.algorithm.save(model_dir)
+    def save(self, model_dir: str):
+        self.algorithm.save(model_dir)
 
 
 class EvaluationOrchestrator:

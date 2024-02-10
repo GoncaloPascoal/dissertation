@@ -1,11 +1,11 @@
+
 import random
 from argparse import ArgumentParser
 from datetime import datetime, timedelta
 from time import sleep
 from typing import cast
 
-from qiskit.providers.ibmq import IBMQBackend
-from qiskit_ibm_provider import IBMProvider
+from qiskit_ibm_provider import IBMBackend, IBMProvider
 from tqdm.rich import tqdm
 
 from scripts.ibmq.current_calibration import save_properties
@@ -23,7 +23,7 @@ def main():
     args = parser.parse_args()
 
     provider = IBMProvider()
-    backend = cast(IBMQBackend, provider.get_backend(args.backend))
+    backend = cast(IBMBackend, provider.get_backend(args.backend))
     config = backend.configuration()
 
     online_date = cast(datetime, config.online_date) + timedelta(hours=23)
