@@ -39,19 +39,6 @@ class CheckpointConfig:
     model_dir: str
     interval: int = field(default=25, kw_only=True)
 
-def get_checkpoint_iters(checkpoint_dir: str | Path) -> int:
-    if isinstance(checkpoint_dir, str):
-        checkpoint_dir = Path(checkpoint_dir)
-
-    return int(checkpoint_dir.name.removeprefix('checkpoint_'))
-
-def get_latest_checkpoint_dir(model_dir: str | Path) -> Path:
-    if isinstance(model_dir, str):
-        model_dir = Path(model_dir)
-
-    return max((path for path in model_dir.iterdir() if path.is_dir()), key=get_checkpoint_iters)  # type: ignore
-
-
 class TrainingOrchestrator:
     algorithm: PPO
 

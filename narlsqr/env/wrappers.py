@@ -6,6 +6,7 @@ import gymnasium as gym
 import numpy as np
 from qiskit import QuantumCircuit
 from qiskit.providers.models import BackendProperties
+from qiskit.transpiler import CouplingMap
 from qiskit.transpiler.passes import DenseLayout
 
 from narlsqr.env import RoutingEnv, RoutingObs
@@ -143,7 +144,9 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
 
         error_rates = np.array(get_error_rates_from_backend_properties(backend_properties), copy=False)
         env.calibrate(error_rates)
-        env.layout_pass = DenseLayout(backend_prop=backend_properties)
+
+        qiskit_coupling_map = CouplingMap(env.coupling_map.edge_list())
+        env.layout_pass = DenseLayout(qiskit_coupling_map, backend_properties)
 
         super().__init__(StochasticPolicyWrapper(env))
 
