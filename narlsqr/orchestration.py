@@ -7,7 +7,6 @@ from collections.abc import Collection, Set
 from dataclasses import dataclass, field
 from datetime import datetime
 from numbers import Real
-from pathlib import Path
 from typing import Final, Optional, Self, cast
 
 import numpy as np
