@@ -7,7 +7,7 @@ from collections.abc import Collection, Set
 from dataclasses import dataclass, field
 from datetime import datetime
 from numbers import Real
-from typing import Final, Optional, Self, cast
+from typing import Any, Final, Optional, Self, cast
 
 import numpy as np
 from qiskit import QuantumCircuit, transpile
@@ -41,12 +41,15 @@ class CheckpointConfig:
 class TrainingOrchestrator:
     algorithm: PPO
 
+    TENSORBOARD_LOGGING_DIR_FILE: Final[str] = 'tensorboard_logging_dir.txt'
+
     def __init__(
         self,
         env_creator: Factory[RoutingEnv],
         circuit_generator: CircuitGenerator,
         noise_generator: NoiseGenerator,
         *,
+        model_dir: Optional[str] = None,
         recalibration_interval: int = 64,
         episodes_per_circuit: int = 1,
         checkpoint_config: Optional[CheckpointConfig] = None,
@@ -84,11 +87,22 @@ class TrainingOrchestrator:
             episodes_per_circuit=episodes_per_circuit,
         )
 
-        env_name = env_creator().name
-        time_str = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        logging_dir = f'{env_name}_{time_str}'
+        if model_dir:
+            # Existing model restored from checkpoint (use same logging directory)
+            with open(os.path.join(
+                model_dir,
+                TrainingOrchestrator.TENSORBOARD_LOGGING_DIR_FILE,
+            ), encoding='utf8') as f:
+                logging_dir = f.read().strip()
+        else:
+            # New model (create a logging directory)
+            env_name = env_creator().name
+            time_str = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+            logging_dir = os.path.join(base_logging_dir, f'{env_name}_{time_str}')
 
-        def logger_creator(logger_config: dict) -> UnifiedLogger:
+        self.tensorboard_logging_dir = logging_dir
+
+        def logger_creator(logger_config: dict[str, Any]) -> UnifiedLogger:
             if not os.path.exists(base_logging_dir):
                 os.makedirs(base_logging_dir)
 
@@ -123,7 +137,7 @@ class TrainingOrchestrator:
             )
             .callbacks(RoutingCallbacks)
             .debugging(
-                logger_creator=logger_creator,
+                logger_creator=logger_creator,  # type: ignore
                 log_level='ERROR',
                 seed=seed,
             )
@@ -156,7 +170,9 @@ class TrainingOrchestrator:
 
         self.algorithm = config.build()
         self.checkpoint_config = checkpoint_config
-        self.total_iters = 0
+
+        if model_dir:
+            self.algorithm.restore(model_dir)
 
     @staticmethod
     def register_routing_env(
@@ -192,46 +208,25 @@ class TrainingOrchestrator:
 
         register_env(ROUTING_ENV_NAME, create_env)
 
-    @classmethod
-    def from_checkpoint(
-        cls,
-        model_dir: str,
-        env_creator: Factory[RoutingEnv],
-        circuit_generator: CircuitGenerator,
-        noise_generator: NoiseGenerator,
-        *,
-        recalibration_interval: int = 64,
-        episodes_per_circuit: int = 1,
-        checkpoint_config: Optional[CheckpointConfig] = None,
-    ) -> Self:
-        TrainingOrchestrator.register_routing_env(
-            env_creator,
-            circuit_generator,
-            noise_generator,
-            recalibration_interval=recalibration_interval,
-            episodes_per_circuit=episodes_per_circuit,
-        )
-
-        # TODO: Logger creator does not persist after loading model
-
-        obj = cls.__new__(cls)
-        super(TrainingOrchestrator, obj).__init__()
-        obj.algorithm = PPO.from_checkpoint(model_dir)
-        obj.total_iters = obj.algorithm.iteration
-        obj.checkpoint_config = checkpoint_config
-
-        return obj
+    @property
+    def total_iters(self) -> int:
+        return self.algorithm.iteration
 
     def train(self, iters: int):
         for _ in range(iters):
             self.algorithm.train()
-            self.total_iters += 1
 
             if self.checkpoint_config is not None and self.total_iters % self.checkpoint_config.interval == 0:
                 self.save(self.checkpoint_config.model_dir)
 
     def save(self, model_dir: str):
         self.algorithm.save(model_dir)
+
+        with open(os.path.join(
+            model_dir,
+            TrainingOrchestrator.TENSORBOARD_LOGGING_DIR_FILE,
+        ), 'w', encoding='utf8') as f:
+            f.write(self.tensorboard_logging_dir)
 
 
 class EvaluationOrchestrator:

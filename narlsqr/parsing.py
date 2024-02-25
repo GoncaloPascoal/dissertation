@@ -131,33 +131,22 @@ def parse_train_config(
     circuit_generator = parse_circuit_generator(config.pop('circuit_generator'), sample_env)
     noise_generator = parse_noise_generator(config.pop('noise_generator'), sample_env)
 
-    checkpoint_config = config.pop('checkpoint_config', None)
-    if checkpoint_config is not None:
-        checkpoint_config = CheckpointConfig(**checkpoint_config)
+    checkpoint_config: Optional[CheckpointConfig] = None
+    checkpoint_config_args: Optional[dict[str, Any]] = config.pop('checkpoint_config', None)
+    if checkpoint_config_args is not None:
+        checkpoint_config = CheckpointConfig(**checkpoint_config_args)
 
     args = dict(
         env_creator=env_creator,
         circuit_generator=circuit_generator,
         noise_generator=noise_generator,
         checkpoint_config=checkpoint_config,
+        model_dir=model_dir,
         **config,
     )
     args.update(override_args)
 
-    if model_dir is None:
-        orchestrator = TrainingOrchestrator(**args)
-    else:
-        # Retain only environment or training-related args
-        args = {
-            k: v for k, v in args.items() if k in {
-                'env_creator', 'circuit_generator', 'noise_generator', 'recalibration_interval',
-                'episodes_per_circuit', 'checkpoint_config',
-            }
-        }
-
-        orchestrator = TrainingOrchestrator.from_checkpoint(model_dir, **args)
-
-    return orchestrator
+    return TrainingOrchestrator(**args)
 
 def parse_calibration_data(path: str) -> BackendProperties:
     with open(path, encoding='utf8') as f:
