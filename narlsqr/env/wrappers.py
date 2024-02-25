@@ -1,19 +1,20 @@
 
 from math import inf
-from typing import Optional, Any
+from typing import Optional, Any, SupportsFloat
 
 import gymnasium as gym
 import numpy as np
 from qiskit import QuantumCircuit
 from qiskit.providers.models import BackendProperties
-from qiskit.transpiler.passes import NoiseAdaptiveLayout
+from qiskit.transpiler import CouplingMap
+from qiskit.transpiler.passes import DenseLayout
 
 from narlsqr.env import RoutingEnv, RoutingObs
 from narlsqr.generators.circuit import CircuitGenerator
 from narlsqr.generators.noise import NoiseGenerator, get_error_rates_from_backend_properties
 
 
-class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
+class TrainingWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
     """
     Wraps a :py:class:`RoutingEnv`, automatically generating circuits and gate error rates at fixed intervals to
     help train deep learning algorithms.
@@ -77,7 +78,7 @@ class TrainingWrapper(gym.Wrapper[RoutingObs, int]):
         return super().reset(seed=seed, options=options)
 
 
-class StochasticPolicyWrapper(gym.Wrapper[RoutingObs, int]):
+class StochasticPolicyWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
     best_reward: float
     best_circuit: QuantumCircuit
 
@@ -98,7 +99,7 @@ class StochasticPolicyWrapper(gym.Wrapper[RoutingObs, int]):
         self.total_reward = 0.0
         return super().reset(seed=seed, options=options)
 
-    def step(self, action: int) -> tuple[RoutingObs, float, bool, bool, dict]:
+    def step(self, action: int) -> tuple[RoutingObs, SupportsFloat, bool, bool, dict[str, Any]]:
         result = super().step(action)
 
         _, reward, terminated, *_ = result
@@ -115,7 +116,7 @@ class StochasticPolicyWrapper(gym.Wrapper[RoutingObs, int]):
         self.best_circuit = self.unwrapped.circuit.copy_empty_like()
 
 
-class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
+class EvaluationWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
     """
     Wraps a :py:class:`RoutingEnv`, automatically generating circuits to evaluate the performance of a reinforcement
     learning model.
@@ -143,7 +144,9 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int]):
 
         error_rates = np.array(get_error_rates_from_backend_properties(backend_properties), copy=False)
         env.calibrate(error_rates)
-        env.layout_pass = NoiseAdaptiveLayout(backend_properties)
+
+        qiskit_coupling_map = CouplingMap(env.coupling_map.edge_list())
+        env.layout_pass = DenseLayout(qiskit_coupling_map, backend_properties)
 
         super().__init__(StochasticPolicyWrapper(env))
 

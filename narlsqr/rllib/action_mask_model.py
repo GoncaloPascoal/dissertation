@@ -54,6 +54,7 @@ class ActionMaskModel(TorchModelV2, nn.Module):
         low = np.inf
         high = -np.inf
 
+        space: spaces.Box
         for key, space in true_obs_space.items():
             features = np.prod(space.shape)
             if key == 'circuit_matrix' and self.embedding is not None:

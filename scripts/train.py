@@ -2,12 +2,10 @@
 import argparse
 import logging
 import os
-import pathlib
 from argparse import ArgumentParser
 
 import ray
 
-from narlsqr.orchestration import get_latest_checkpoint_dir, is_checkpoint
 from narlsqr.parsing import parse_train_config
 
 def main():
@@ -44,16 +42,14 @@ def main():
     iters: int = args.pop('iters')
     model_dir: str = args.pop('model_dir')
 
-    if os.path.exists(model_dir):
-        if is_checkpoint(model_dir):
-            checkpoint_dir = model_dir
-            model_dir = str(pathlib.Path(model_dir).parent)
-        else:
-            checkpoint_dir = str(get_latest_checkpoint_dir(model_dir))
-    else:
-        checkpoint_dir = None
+    existing_model_dir = model_dir if os.path.isdir(model_dir) else None
 
-    orchestrator = parse_train_config(env_config, train_config, checkpoint_dir=checkpoint_dir, override_args=args)
+    orchestrator = parse_train_config(
+        env_config,
+        train_config,
+        model_dir=existing_model_dir,
+        override_args=args,
+    )
 
     orchestrator.train(iters)
     orchestrator.save(model_dir)

@@ -5,7 +5,6 @@ from argparse import ArgumentParser
 
 import ray
 
-from narlsqr.orchestration import get_latest_checkpoint_dir
 from narlsqr.parsing import parse_eval_config
 
 def main():
@@ -15,7 +14,7 @@ def main():
     parser.add_argument('env_config', help='environment configuration file')
     parser.add_argument('eval_config', help='evaluation configuration file')
     parser.add_argument('model_dir', help='path to trained model')
-    parser.add_argument('save_to',help='path where metrics should be saved to')
+    parser.add_argument('save_to', help='path where metrics should be saved to')
 
     parser.add_argument('-e', '--evaluation-episodes', metavar='N', type=int, default=argparse.SUPPRESS,
                         help='evaluation episodes per circuit')
@@ -40,13 +39,10 @@ def main():
     model_dir = args.pop('model_dir')
     save_to = args.pop('save_to')
 
-    checkpoint_dir = str(get_latest_checkpoint_dir(model_dir))
-
-    orchestrator = parse_eval_config(env_config, eval_config, checkpoint_dir, override_args=args)
+    orchestrator = parse_eval_config(env_config, eval_config, model_dir, override_args=args)
     orchestrator.evaluate()
     orchestrator.metrics_analyzer.pickle(save_to)
 
 
 if __name__ == '__main__':
     main()
-

@@ -12,7 +12,7 @@ seed: 0
 
 # Model
 hidden_layers: [512, 512]
-embedding_dim: 4
+embedding_dim: 5
 entropy_coeff: 1.0e-2
 minibatch_size: 4096
 batch_size: 65536
