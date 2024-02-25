@@ -7,7 +7,7 @@ from collections.abc import Collection, Set
 from dataclasses import dataclass, field
 from datetime import datetime
 from numbers import Real
-from typing import Any, Final, Optional, Self, cast
+from typing import Any, Final, Optional, cast
 
 import numpy as np
 from qiskit import QuantumCircuit, transpile
