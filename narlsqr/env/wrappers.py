@@ -7,7 +7,7 @@ import numpy as np
 from qiskit import QuantumCircuit
 from qiskit.providers.models import BackendProperties
 from qiskit.transpiler import CouplingMap
-from qiskit.transpiler.passes import DenseLayout
+from qiskit.transpiler.passes import SabreLayout
 
 from narlsqr.env import RoutingEnv, RoutingObs
 from narlsqr.generators.circuit import CircuitGenerator
@@ -81,11 +81,19 @@ class TrainingWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
 class StochasticPolicyWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
     best_reward: float
     best_circuit: QuantumCircuit
+    total_added_cnot_reward: float
 
     unwrapped: RoutingEnv
 
-    def __init__(self, env: RoutingEnv):
+    def __init__(
+        self,
+        env: RoutingEnv,
+        *,
+        skip_redundant_iterations: bool = True,
+    ):
         super().__init__(env)
+
+        self.skip_redundant_iterations = skip_redundant_iterations
 
         self.reset_best_circuit()
         self.total_reward = 0.0
@@ -102,8 +110,14 @@ class StochasticPolicyWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
     def step(self, action: int) -> tuple[RoutingObs, SupportsFloat, bool, bool, dict[str, Any]]:
         result = super().step(action)
 
-        _, reward, terminated, *_ = result
+        obs, reward, terminated, truncated, info = result
         self.total_reward += reward
+
+        if self.skip_redundant_iterations:
+            remaining_added_gate_reward = self.unwrapped.dag.count_ops().get('cx', 0) * self.unwrapped.added_gate_reward
+            if self.total_reward + remaining_added_gate_reward < self.best_reward:
+                # Can no longer achieve a higher reward than the current best reward when routing this circuit
+                return obs, reward, True, truncated, info
 
         if terminated and self.total_reward > self.best_reward:
             self.best_reward = self.total_reward
@@ -137,7 +151,9 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
         env: RoutingEnv,
         circuit_generator: CircuitGenerator,
         backend_properties: BackendProperties,
+        *,
         evaluation_episodes: int = 10,
+        skip_redundant_iterations: bool = True,
     ):
         self.circuit_generator = circuit_generator
         self.evaluation_iters = evaluation_episodes
@@ -146,9 +162,9 @@ class EvaluationWrapper(gym.Wrapper[RoutingObs, int, RoutingObs, int]):
         env.calibrate(error_rates)
 
         qiskit_coupling_map = CouplingMap(env.coupling_map.edge_list())
-        env.layout_pass = DenseLayout(qiskit_coupling_map, backend_properties)
+        env.layout_pass = SabreLayout(qiskit_coupling_map, skip_routing=True)
 
-        super().__init__(StochasticPolicyWrapper(env))
+        super().__init__(StochasticPolicyWrapper(env, skip_redundant_iterations=skip_redundant_iterations))
 
         self.current_iter = 0
 

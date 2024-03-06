@@ -240,6 +240,7 @@ class EvaluationOrchestrator:
         backend_properties: BackendProperties,
         *,
         evaluation_episodes: int = 10,
+        skip_redundant_iterations: bool = True,
         stochastic: bool = True,
         num_circuits: Optional[int] = None,
         routing_methods: str | Collection[str] = 'sabre',
@@ -275,6 +276,7 @@ class EvaluationOrchestrator:
             circuit_generator,
             backend_properties,
             evaluation_episodes=evaluation_episodes,
+            skip_redundant_iterations=skip_redundant_iterations,
         )
 
         self.stochastic = stochastic
