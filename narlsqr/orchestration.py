@@ -324,6 +324,7 @@ class EvaluationOrchestrator:
 
         original_depth = original_circuit.depth()
         depth = routed_circuit.depth()
+        added_depth = depth - original_depth
 
         reliability = circuit_reliability(routed_circuit, self.routing_env.edge_to_reliability)
         log_reliability = np.emath.logn(self.routing_env.noise_config.log_base, reliability)
@@ -334,12 +335,14 @@ class EvaluationOrchestrator:
 
         log_metric_checked('original_depth', original_depth)
         log_metric_checked('depth', depth)
+        log_metric_checked('added_depth', depth)
 
         log_metric_checked('reliability', reliability)
         log_metric_checked('log_reliability', log_reliability)
 
         log_metric_checked('normalized_added_cnot_count', added_cnot_count / original_cnot_count)
         log_metric_checked('normalized_depth', depth / original_depth)
+        log_metric_checked('normalized_added_depth', added_depth / original_depth)
         log_metric_checked('normalized_log_reliability', log_reliability / original_cnot_count)
 
     def evaluate(self):

@@ -67,16 +67,16 @@ def random_circuits_analysis(device: str):
     noise_unaware = MetricsAnalyzer.unpickle(f'{RESULTS_DIR}/{device}/random_nu.pickle')
     metrics_analyzer.metrics['rl_noise_unaware'] = noise_unaware.metrics['rl']
 
-    for metric in ['added_cnot_count', 'depth', 'log_reliability', 'reliability']:
+    for metric in ['added_cnot_count', 'added_depth', 'log_reliability', 'reliability']:
         log_metric(metrics_analyzer, prefix, metric)
 
     ax = metrics_analyzer.box_plot('added_cnot_count')
     format_plot(ax, 'Routing Algorithm', 'Additional CNOT Gates')
     save_current_plot(f'{prefix}/added_cnot_count.pdf')
 
-    ax = metrics_analyzer.box_plot('depth')
-    format_plot(ax, 'Routing Algorithm', 'Circuit Depth')
-    save_current_plot(f'{prefix}/depth.pdf')
+    ax = metrics_analyzer.box_plot('added_depth')
+    format_plot(ax, 'Routing Algorithm', 'Additional Depth')
+    save_current_plot(f'{prefix}/added_depth.pdf')
 
     ax = metrics_analyzer.box_plot('log_reliability')
     format_plot(ax, 'Routing Algorithm', 'Log Reliability')
@@ -90,7 +90,7 @@ def real_circuits_analysis(device: str):
     noise_unaware = MetricsAnalyzer.unpickle(f'{RESULTS_DIR}/{device}/real_nu.pickle')
     metrics_analyzer.metrics['rl_noise_unaware'] = noise_unaware.metrics['rl']
 
-    for metric in ['normalized_added_cnot_count', 'normalized_depth', 'normalized_log_reliability']:
+    for metric in ['normalized_added_cnot_count', 'normalized_added_depth', 'normalized_log_reliability']:
         log_metric(metrics_analyzer, prefix, metric, default_format='.3f', reliability_format='.4f')
 
     ax = metrics_analyzer.box_plot('normalized_added_cnot_count')
@@ -98,9 +98,9 @@ def real_circuits_analysis(device: str):
     format_plot(ax, 'Routing Algorithm', 'Additional CNOT Gates (Normalized)')
     save_current_plot(f'{prefix}/added_cnot_count.pdf')
 
-    ax = metrics_analyzer.box_plot('normalized_depth')
-    format_plot(ax, 'Routing Algorithm', 'Depth (Normalized)')
-    save_current_plot(f'{prefix}/depth.pdf')
+    ax = metrics_analyzer.box_plot('normalized_added_depth')
+    format_plot(ax, 'Routing Algorithm', 'Additional Depth (Normalized)')
+    save_current_plot(f'{prefix}/added_depth.pdf')
 
     ax = metrics_analyzer.box_plot('normalized_log_reliability')
     format_plot(ax, 'Routing Algorithm', 'Log Reliability (Normalized)')
