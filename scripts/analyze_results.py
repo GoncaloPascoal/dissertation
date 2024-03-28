@@ -162,7 +162,7 @@ def swap_vs_bridge():
 
 
 def evaluation_episodes_analysis():
-    prefix = ANALYSIS_DIR
+    prefix = f'{ANALYSIS_DIR}/episodes'
     os.makedirs(prefix, exist_ok=True)
     episodes_list = [1, 2, 4, 8, 16]
 
@@ -180,6 +180,8 @@ def evaluation_episodes_analysis():
         name = f'stochastic_{num_episodes}ep'
         stochastic = MetricsAnalyzer.unpickle(f'{results_prefix}/{name}.pickle')
         metrics[name] = stochastic.metrics['rl']
+
+    log_metric(metrics_analyzer, prefix, 'log_reliability')
 
     df = metrics_analyzer.metric_as_df('log_reliability')
     rename_map = dict(
@@ -219,7 +221,7 @@ def routing_time():
 
 
 def enhancements_analysis():
-    prefix = ANALYSIS_DIR
+    prefix = f'{ANALYSIS_DIR}/enhancements'
     os.makedirs(prefix, exist_ok=True)
 
     metrics_analyzer = MetricsAnalyzer.unpickle(f'{RESULTS_DIR}/belem/random.pickle')
@@ -239,6 +241,8 @@ def enhancements_analysis():
     for variant in variants:
         path = f'{RESULTS_DIR}/belem/enhancements/{variant}.pickle'
         metrics[variant] = MetricsAnalyzer.unpickle(path).metrics['rl']
+
+    log_metric(metrics_analyzer, prefix, 'log_reliability')
 
     df = metrics_analyzer.metric_as_df('log_reliability')
     df.rename(columns=dict(rl='Default', **variants, sabre='SABRE'), inplace=True)

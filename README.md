@@ -14,7 +14,7 @@ This dissertation proposes a method to address the **qubit routing problem** usi
 
 Qubit routing, one of the most crucial stages in the compilation process, introduces additional operations to ensure that multi-qubit gates are only performed between connected qubits. It is a challenging combinatorial optimization problem that has been shown to be NP-complete.
 
-Our RL environment represents quantum circuits as numerical matrices and we also provide the error rates of individual device edges to the models. Possible actions include inserting SWAP or BRIDGE operations, and we use action masking to prevent invalid actions and speed up training. To further optimize the routing process, we also perform gate commutation analysis. We have evaluated this approach for five IBM quantum computers ranging from 5 to 27 qubits, using both randomly generated and realistic circuits.
+Our RL environment represents quantum circuits as numerical matrices, and we also provide the error rates of individual device edges to the models. Possible actions include inserting SWAP or BRIDGE operations, and we use action masking to prevent invalid actions and speed up training. To further optimize the routing process, we also perform gate commutation analysis. We have evaluated this approach for five IBM quantum computers ranging from 5 to 27 qubits, using both randomly generated and realistic circuits.
 
 ## Instructions
 
