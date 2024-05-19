@@ -1,17 +1,21 @@
 
 import random
+import warnings
 from argparse import ArgumentParser
 from datetime import datetime, timedelta
 from time import sleep
 from typing import cast
 
-from qiskit_ibm_provider import IBMBackend, IBMProvider
+from qiskit_ibm_runtime import IBMBackend, QiskitRuntimeService
+from tqdm import TqdmExperimentalWarning
 from tqdm.rich import tqdm
 
 from scripts.ibmq.current_calibration import save_properties
 
 
 def main():
+    warnings.filterwarnings('ignore', category=TqdmExperimentalWarning)
+
     base_dir = 'data/calibration'
 
     parser = ArgumentParser('past_calibration', description='Obtain past IBMQ device calibration data')
@@ -22,8 +26,8 @@ def main():
 
     args = parser.parse_args()
 
-    provider = IBMProvider()
-    backend = cast(IBMBackend, provider.get_backend(args.backend))
+    service = QiskitRuntimeService(channel='ibm_quantum')
+    backend = cast(IBMBackend, service.get_backend(args.backend))
     config = backend.configuration()
 
     online_date = cast(datetime, config.online_date) + timedelta(hours=23)

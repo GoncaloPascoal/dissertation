@@ -2,11 +2,14 @@
 import argparse
 import logging
 import os
+import warnings
 from argparse import ArgumentParser
 
 import ray
+from tqdm import TqdmExperimentalWarning
 
 from narlsqr.parsing import parse_train_config
+
 
 def main():
     parser = ArgumentParser(
@@ -34,6 +37,8 @@ def main():
                         help='seed for random number generators')
 
     args = vars(parser.parse_args())
+
+    warnings.filterwarnings('ignore', category=TqdmExperimentalWarning)
 
     ray.init(logging_level=logging.ERROR)
 

@@ -1,5 +1,6 @@
 
 import os
+import warnings
 from typing import Final
 
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ import seaborn as sns
 from matplotlib.axes import Axes
 from matplotlib.ticker import MaxNLocator
 from rich import print
+from tqdm import TqdmExperimentalWarning
 
 from narlsqr.analysis import MetricsAnalyzer
 
@@ -259,6 +261,8 @@ def enhancements_analysis():
 
 
 def main():
+    warnings.filterwarnings('ignore', category=TqdmExperimentalWarning)
+
     sns.set_theme(style='whitegrid')
     plt.rcParams['font.sans-serif'] = ['Nimbus Sans']
 

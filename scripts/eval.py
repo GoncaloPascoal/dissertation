@@ -1,11 +1,14 @@
 
 import argparse
 import logging
+import warnings
 from argparse import ArgumentParser
 
 import ray
+from tqdm import TqdmExperimentalWarning
 
 from narlsqr.parsing import parse_eval_config
+
 
 def main():
     parser = ArgumentParser('eval', description='Noise-Adaptive Reinforcement Learning Strategies for Qubit '
@@ -31,6 +34,8 @@ def main():
                         help='Use deterministic policy (evaluation_iters will be set to 1)')
 
     args = vars(parser.parse_args())
+
+    warnings.filterwarnings('ignore', category=TqdmExperimentalWarning)
 
     ray.init(logging_level=logging.ERROR)
 
