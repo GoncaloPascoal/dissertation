@@ -1,6 +1,7 @@
 
 import os
 import warnings
+from collections import defaultdict
 from typing import Final
 
 import matplotlib.pyplot as plt
@@ -8,6 +9,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from rich import print
 from tqdm import TqdmExperimentalWarning
@@ -113,51 +115,72 @@ def swap_vs_bridge():
     prefix = ANALYSIS_DIR
     os.makedirs(prefix, exist_ok=True)
 
-    data = {}
+    data = defaultdict(list)
 
     for device in DEVICES:
-        metrics_analyzer = MetricsAnalyzer.unpickle(f'{RESULTS_DIR}/{device}/random.pickle')
+        for dataset in ('random', 'real'):
+            metrics_analyzer = MetricsAnalyzer.unpickle(f'{RESULTS_DIR}/{device}/{dataset}.pickle')
 
-        for action in ['swap', 'bridge']:
-            mean = metrics_analyzer.metric_as_df(f'{action}_count')['rl'].mean()
+            for action in ('swap', 'bridge'):
+                mean = metrics_analyzer.metric_as_df(f'{action}_count')['rl'].mean()
 
-            data.setdefault('count', []).append(mean)
-            data.setdefault('action', []).append(action.upper())
-            data.setdefault('device', []).append(device.capitalize())
+                data['count'].append(mean)
+                data['action'].append(action.upper())
+                data['device'].append(device.capitalize())
+                data['dataset'].append(dataset.capitalize())
 
     df = pd.DataFrame(data)
-    cross_tab = pd.crosstab(
-        index=df['device'],
-        columns=df['action'],
-        values=df['count'],
-        aggfunc='sum',
-        normalize='index',  # type: ignore
-    )
+    df['count'] /= df.groupby(['device', 'dataset'])['count'].transform('sum')
 
-    order = [device.capitalize() for device in DEVICES]
+    fig: Figure
+    ax: Axes
 
-    ax: Axes = cross_tab.loc[order].plot(kind='bar', stacked=True)
+    fig, ax = plt.subplots()
+
+    x = np.arange(len(DEVICES))
+    width = 0.4
+
+    colors = {
+        ('Random', 'SWAP'): 'cornflowerblue',
+        ('Random', 'BRIDGE'): 'sandybrown',
+        ('Real', 'SWAP'): 'navy',
+        ('Real', 'BRIDGE'): 'sienna',
+    }
+
+    for (dataset, action), data in df.groupby(['dataset', 'action']):
+        offset = width if dataset == 'Real' else 0
+
+        if action == 'SWAP':
+            bottom = df.loc[(df['dataset'] == dataset) & (df['action'] == 'BRIDGE')]['count']
+        else:
+            bottom = None
+
+        rects = ax.bar(
+            x + offset - width / 2,
+            data['count'], width,
+            bottom=bottom,
+            label=f'{action} ({dataset})',
+            color=colors[(dataset, action)],
+        )
+
+        ax.bar_label(
+            rects,
+            [f'{round(x * 100, 1)}%' for x in data['count']],
+            label_type='center',
+            color='white',
+            fontsize=16,
+            fontweight='bold',
+        )
+
     format_plot(ax, 'Device', 'Proportion', y_ticks=10)
-
-    for n, x in enumerate([*cross_tab.loc[order].index.values]):
-        for proportion, y_loc in zip(cross_tab.loc[x], cross_tab.loc[x].cumsum()):
-            plt.text(
-                x=n - 0.20,
-                y=(y_loc - proportion) + (proportion / 2),
-                s=f'{np.round(proportion * 100, 1)}%',
-                color='white',
-                fontsize=20,
-                fontweight='bold',
-            )
-
     ax.legend(
         loc='upper right',
-        fontsize=20,
+        fontsize=18,
         title='Action',
-        title_fontproperties={'size': 20, 'weight': 'bold'},
+        title_fontproperties={'size': 18, 'weight': 'bold'},
     )
+    ax.set_xticks(x, [device.capitalize() for device in DEVICES])
     ax.set_ybound(upper=1.0)
-    plt.xticks(rotation=0)
     ax.get_figure().set_size_inches(13.0, 10.0)
 
     save_current_plot(f'{prefix}/swap_vs_bridge.pdf')
