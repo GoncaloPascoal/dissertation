@@ -2,6 +2,7 @@
 import os
 import warnings
 from collections import defaultdict
+from pathlib import Path
 from typing import Final
 
 import matplotlib.pyplot as plt
@@ -21,14 +22,15 @@ ANALYSIS_DIR: Final = 'data/analysis'
 DEVICES: Final = ['manila', 'belem', 'nairobi', 'guadalupe', 'mumbai']
 
 
-def format_plot(ax: Axes, x_label: str, y_label: str, y_ticks: int = 16):
-    ax.tick_params(labelsize=23)
+def format_plot(ax: Axes, x_label: str, y_label: str, y_ticks: int = 16, label_size: int = 23, font_size: int = 27):
+    ax.tick_params(labelsize=label_size)
     ax.get_yaxis().set_major_locator(MaxNLocator(nbins=y_ticks))
-    ax.set_xlabel(x_label, labelpad=8.0, fontsize=27, fontweight='bold')
-    ax.set_ylabel(y_label, labelpad=8.0, fontsize=27, fontweight='bold')
+    ax.set_xlabel(x_label, labelpad=8.0, fontsize=font_size, fontweight='bold')
+    ax.set_ylabel(y_label, labelpad=8.0, fontsize=font_size, fontweight='bold')
     ax.get_figure().set_size_inches(14.0, 14.0)
 
 def save_current_plot(path: str):
+    os.makedirs(Path(path).parent, exist_ok=True)
     plt.savefig(path, bbox_inches='tight', pad_inches=0.2)
     plt.close()
 
